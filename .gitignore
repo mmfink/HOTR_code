@@ -34,3 +34,12 @@ vignettes/*.pdf
 
 # Shiny token, see https://shiny.rstudio.com/articles/shinyapps.html
 rsconnect/
+
+# Python
+*.py[cod]
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
