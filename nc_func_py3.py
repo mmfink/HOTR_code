@@ -29,7 +29,7 @@ gdal.UseExceptions()
 
 def calc_it(data, masks, method):
     """Run basic calculations on a masked array
-    Right now method can be either 'sum' or 'mean' along time axis
+    Right now method can be either 'sum' or 'mean' along axis=0
     data = ndarray
     masks = masks used to group data by years, seasons, month, etc.
     method = string; 'sum' or 'mean'

@@ -63,7 +63,6 @@ import nc_func_py3 as nc_func
 session_dir = r"E:\Climate\metdata"
 outFolder = "Derived"
 outdir = os.path.join(session_dir, outFolder)
-#var_dict = {"pr":"precipitation_amount"} #testing
 var_dict = {"pr":"precipitation_amount", "tmmn":"air_temperature",
             "tmmx":"air_temperature", "pet":"potential_evapotranspiration"}
 hYrs = range(1994, 2015, 1)
@@ -74,7 +73,7 @@ clip_idx = nc_func.clipindex_fromXY((inbbox[0], inbbox[1]),
                                     (inbbox[2], inbbox[3]),
                                     (outbbox[0], outbbox[1]),
                                     (outbbox[2], outbbox[3]), cell)
-arglist = [outbbox[0], outbbox[1], cell, (cell * -1)]
+
 filepfx = var_dict.keys()
 
 def extractvars(nc_name, clip, var):
