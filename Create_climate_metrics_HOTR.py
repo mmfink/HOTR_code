@@ -194,7 +194,8 @@ for b in base:
     gdd = "_".join([pfx, "base" + str(b)])
     outfile = os.path.join(session_dir, wy.clean_name(source, 0, gdd) + ".tif")
     outary = growingdegrees(tmean, var_dict[tn], b)
-    nc_func.array2raster(outfile, outary, *arglist)
+    flipary = nc_func.reverse(outary)
+    nc_func.array2raster(outfile, flipary, *arglist)
 #%%#
 #Calculate total precipitation for annual, winter-spring, and summer-fall
 print("On to precipitation!")
@@ -204,7 +205,8 @@ seasons = [0, 5, 6]
 for i in seasons:
     outfile = os.path.join(session_dir, wy.clean_name(source, i, pfx) + ".tif")
     tifary = calc_seasonal(var_dict[pfx], i, infile, "sum", hYrs)
-    nc_func.array2raster(outfile, tifary, *arglist)
+    flipary = nc_func.reverse(tifary)
+    nc_func.array2raster(outfile, flipary, *arglist)
 #%%#
 #Calculate max summer temperature
 print("Max temperature next")
@@ -212,7 +214,8 @@ pfx = "tmmx"
 infile = os.path.join(session_dir, iname(pfx, filepattern))
 outfile = os.path.join(session_dir, wy.clean_name(source, 3, pfx) + ".tif")
 tifary = calc_seasonal(var_dict[pfx], 3, infile, "mean", hYrs)
-nc_func.array2raster(outfile, tifary, *arglist)
+flipary = nc_func.reverse(tifary)
+nc_func.array2raster(outfile, flipary, *arglist)
 #%%#
 #Calculate average annual PET
 print("Finally, PET")
@@ -220,5 +223,6 @@ pfx = "pet"
 infile = os.path.join(session_dir, iname(pfx, filepattern))
 outfile = os.path.join(session_dir, wy.clean_name(source, 0, pfx) + ".tif")
 tifary = calc_seasonal(var_dict[pfx], 0, infile, "mean", hYrs)
-nc_func.array2raster(outfile, tifary, *arglist)
+flipary = nc_func.reverse(tifary)
+nc_func.array2raster(outfile, flipary, *arglist)
 #%%#
