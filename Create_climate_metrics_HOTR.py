@@ -193,8 +193,12 @@ tn = "tmmn"
 tx = "tmmx"
 tnfile = os.path.join(session_dir, iname(tn, filepattern))
 txfile = os.path.join(session_dir, iname(tx, filepattern))
-daily_tmean(tnfile, txfile, var_dict[tn], var_dict[tx])
 tmean = txfile.replace("tmmx", "tmean")
+if os.path.isfile(tmean):
+    print("Found", tmean, "- Using this one.")
+else:
+    daily_tmean(tnfile, txfile, var_dict[tn], var_dict[tx])
+
 base = [0, 5]
 pfx = "GDD"
 for b in base:
