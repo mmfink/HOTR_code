@@ -6,7 +6,7 @@ NOTE that 'Process_Met_data_forHOTR.py' must have already been run.
 
 @author: Michelle M. Fink, michelle.fink@colostate.edu
 Colorado Natural Heritage Program, Colorado State University
-Created 07/25/2019, Last Modified 07/29/2019 - Built on Python 3.7.3
+Created 07/25/2019, Last Modified 07/30/2019 - Built on Python 3.7.3
 
 Code licensed under the GNU General Public License version 3.
 This script is free software: you can redistribute it and/or modify
@@ -36,7 +36,8 @@ filepattern = "($var)_gridmet_1994_2014.nc"
 source = "gridMET_1994_2014"
 hYrs = range(1994, 2015, 1)
 cell = 0.041666667
-outbbox = [-112.558333169, 49.024999997, -96.058333532, 29.483333372]
+outbbox = [-112.579166412354, 49.0038690567017, #geotiffs use cell centers
+           -96.0801734924316, 29.4217309951782] #which is what these numbers are
 arglist = [(outbbox[0], outbbox[1]), cell, (cell * -1)]
 
 def iname(prefix, pattern):
