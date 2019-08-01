@@ -112,9 +112,6 @@ def daily_tmean(tmin_nc, tmax_nc, tmin_var, tmax_var):
     txds = Dataset(tmax_nc, "r")
     tnvar = tnds.variables[tmin_var]
     txvar = txds.variables[tmax_var]
-    cols = txvar.shape[2]
-    rows = txvar.shape[1]
-    depth = txvar.shape[0]
     txData = txvar[:]
     #FIXME: I've got the below variables hard-coded for now
     vLon = txds.variables["longitude"]
@@ -122,59 +119,43 @@ def daily_tmean(tmin_nc, tmax_nc, tmin_var, tmax_var):
     vLat = txds.variables["latitude"]
     ltSlice = vLat[:]
     vTime = txds.variables["time"]
-    tData = vTime[:]
+    tdata = vTime[:]
     tUnits = vTime.units
     tCalen = vTime.calendar
     txds.close()
     tnData = tnvar[:]
     tnds.close()
-    mxChunk = np.split(txData, depth) #one day chunks
-    mnChunk = np.split(tnData, depth)
-    del txData #freeing memory as we go
-    del tnData
-    #Get the mean temperature a chunk at a time so as not to run out of memory
-    for i in range(depth):
-        rawChunk = np.concatenate((mxChunk[i], mnChunk[i]), axis=0)
-        aveChunk = np.mean(rawChunk, axis=0, keepdims=True)
-        addChunk = np.reshape(aveChunk, (-1, rows, cols))
-        if i == 0:
-            tmean = np.array(addChunk)
+    dateRng = num2date(tdata, tUnits, tCalen)
+    yrs = np.array([a_date.year for a_date in dateRng], dtype=np.int)
+    progress = 0
+    blocks_max = iter_blocks(txData, yrs)
+    blocks_min = iter_blocks(tnData, yrs)
+
+    for bx, bn in zip(blocks_max, blocks_min):
+        progress += 1
+        print("Processing chunk", progress)
+        mnary = np.ma.divide(np.ma.add(bx, bn), 2)
+        if progress == 1:
+            tmean = np.ma.array(mnary)
         else:
-            tmean = np.concatenate((tmean, addChunk), axis=0)
-    del mxChunk
-    del mnChunk
+            tmean = np.ma.concatenate((tmean, mnary), axis=0)
+
     meta = "Mean daily air temperature in degrees Celcius, from gridded surface meteorological data."
     kwargs = {"varname": "air_temperature", "units": tUnits, "calendar": tCalen,
               "metadatastr": meta}
     outnc = tmax_nc.replace("tmmx", "tmean")
-    nc_func.new_nc(tmean, tData, ltSlice, lnSlice, outnc, **kwargs)
-
-def iter_blocks(ary, years):
-    """iterator for 1-year chunk sizes of daily data """
-    rows = ary.shape[1]
-    cols = ary.shape[2]
-    depth = ary.shape[0]
-    unique_yrs, indices = np.unique(years, return_index=True)
-
-    for i in range(0, len(unique_yrs)):
-        y = unique_yrs[i]
-        if y % 4 == 0:
-            daycnt = 366 #leap years
-        else:
-            daycnt = 365
-        if indices[i] == 0:
-            start_t = 0
-            end_t = daycnt
-        else:
-            start_t = start_t + daycnt + 1
-            end_t = end_t + daycnt
-        yield ary[start_t:end_t, 0:rows, 0:cols]
+    nc_func.new_nc(tmean, tdata, ltSlice, lnSlice, outnc, **kwargs)
 
 def growingdegrees(nc_name, var, base, time="time"):
-    """ Calculate growing degree-days from daily netCDF
+    """ Calculate growing degree-days from daily mean temperature netCDF
+    NOTE that this is based on calendar year, whereas all other metrics are water year,
+    because of the year-based chunks. I don't think it makes a significant difference for
+    this particular metric. Also note that I am taking a 'short-cut' by basing GDD on the
+    daily mean temperature instead of the more precise min and max. In this use-case, GDD
+    is a proxy for forage availability, so this should be adequate.
         nc_name: string; full path and name of netCDF with daily values for multiple years
         var: string; name of data variable
-        base: numer; the base temperature to use, in same units as var
+        base: number; the base temperature to use, in same units as var
         time: string; name of the time dimension, defaults to "time"
 
     returns: 2D numpy array of the mean growing degree-days over all years
@@ -188,7 +169,6 @@ def growingdegrees(nc_name, var, base, time="time"):
     tCalen = tvar.calendar
     ds.close()
     dateRng = num2date(tdata, tUnits, tCalen)
-    #TODO: This doesn't do a water year. Should it?
     yrs = np.array([a_date.year for a_date in dateRng], dtype=np.int)
     progress = 0
     blocks = iter_blocks(ddata, yrs)
