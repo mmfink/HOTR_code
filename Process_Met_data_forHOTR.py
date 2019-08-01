@@ -5,7 +5,7 @@ http://www.climatologylab.org/wget-gridmet.html
 
 @author: Michelle M. Fink, michelle.fink@colostate.edu
 Colorado Natural Heritage Program, Colorado State University
-Last Modified 07/24/2019 - Built on Python 3.7.3
+Last Modified 07/30/2019 - Built on Python 3.7.3
 
 ** Notes about the input data for my reference **
 pr_*.nc tmmn_*.nc tmmx_*.nc pet_*.nc NETCDF3_CLASSIC
@@ -63,9 +63,8 @@ import nc_func_py3 as nc_func
 session_dir = r"E:\Climate\metdata"
 outFolder = "Derived"
 outdir = os.path.join(session_dir, outFolder)
-#var_dict = {"pr":"precipitation_amount"} #testing
-var_dict = {"pr":"precipitation_amount", "tmmn":"air_temperature",
-            "tmmx":"air_temperature", "pet":"potential_evapotranspiration"}
+ var_dict = {"pr":"precipitation_amount", "tmmn":"air_temperature",
+             "tmmx":"air_temperature", "pet":"potential_evapotranspiration"}
 hYrs = range(1994, 2015, 1)
 cell = 0.041666667
 inbbox = [-124.7666666, 49.4, -67.0583333, 25.06666667]
@@ -74,7 +73,7 @@ clip_idx = nc_func.clipindex_fromXY((inbbox[0], inbbox[1]),
                                     (inbbox[2], inbbox[3]),
                                     (outbbox[0], outbbox[1]),
                                     (outbbox[2], outbbox[3]), cell)
-arglist = [outbbox[0], outbbox[1], cell, (cell * -1)]
+
 filepfx = var_dict.keys()
 
 def extractvars(nc_name, clip, var):
@@ -82,6 +81,8 @@ def extractvars(nc_name, clip, var):
     dset = Dataset(nc_name)
     dvar = dset.variables[var]
     ary = dvar[:, clip_idx[3]:clip_idx[1], clip_idx[0]:clip_idx[2]]
+    if var == "air_temperature":
+        ary = np.subtract(ary, 273.15) #Convert K to C
     dset.close()
     return(ary)
 

@@ -29,7 +29,7 @@ gdal.UseExceptions()
 
 def calc_it(data, masks, method):
     """Run basic calculations on a masked array
-    Right now method can be either 'sum' or 'mean' along time axis
+    Right now method can be either 'sum' or 'mean' along axis=0
     data = ndarray
     masks = masks used to group data by years, seasons, month, etc.
     method = string; 'sum' or 'mean'
@@ -50,7 +50,7 @@ def reverse(array, axis=0):
     """
     idx = [slice(None)]*len(array.shape)
     idx[axis] = slice(None, None, -1)
-    return array[idx]
+    return array[tuple(idx)]
 
 def raster2array(ras_name, flip=True):
     """Convert a geoTIFF to a 2D numpy array.
