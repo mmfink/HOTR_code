@@ -73,6 +73,32 @@ def calc_seasonal(var, season, nc_name, calc_type, years, time="time"):
     outary = np.mean(calcary, axis=0)
     return(outary)
 
+def iter_blocks(ary, years):
+    """ iterator for 1-year chunk sizes of daily data
+        ary: 3D numpy array with shape (time, y, x)
+        years: numpy array replacing the 'time' value with a year value with shape (year, , )
+
+    yields a generator object
+    """
+    rows = ary.shape[1]
+    cols = ary.shape[2]
+    depth = ary.shape[0]
+    unique_yrs, indices = np.unique(years, return_index=True)
+
+    for i in range(0, len(unique_yrs)):
+        y = unique_yrs[i]
+        if y % 4 == 0:
+            daycnt = 366 #leap years
+        else:
+            daycnt = 365
+        if indices[i] == 0:
+            start_t = 0
+            end_t = daycnt
+        else:
+            start_t = end_t
+            end_t = end_t + daycnt
+        yield ary[start_t:end_t, 0:rows, 0:cols]
+
 def daily_tmean(tmin_nc, tmax_nc, tmin_var, tmax_var):
     """ Calculate the mean daily temperature from daily min and max temperatures
         tmin_nc: string; full path and name of min temp nc
