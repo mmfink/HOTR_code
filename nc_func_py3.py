@@ -50,7 +50,7 @@ def reverse(array, axis=0):
     """
     idx = [slice(None)]*len(array.shape)
     idx[axis] = slice(None, None, -1)
-    return array[idx]
+    return array[tuple(idx)]
 
 def raster2array(ras_name, flip=True):
     """Convert a geoTIFF to a 2D numpy array.
