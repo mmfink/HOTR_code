@@ -77,17 +77,16 @@ def watyrmask(orig_dates, datelist, yrlist, season, **kwargs):
     mths = np.array([a_date.month for a_date in orig_dates], dtype=np.int)
     if season == 0:
         seasons = np.array([ANN_LU[m] for m in mths], dtype=np.int)
-    elif season > 0 & season < 5:
+    elif (season > 0) & (season < 5):
         seasons = np.array([SEASONS_LU[m] for m in mths], dtype=np.int)
-    elif season == 5 | season == 6:
+    elif season >= 5:
         seasons = np.array([TWOSEASONS_LU[m] for m in mths], dtype=np.int)
     omasks = []
     for a_yr in yrlist:
         omasks.append(np.ma.where(np.ma.logical_and(yrs == a_yr,
                                                     seasons == season))[0])
-    water_dates = np.array(
-        [a_date.replace(
-            year=a_date.year + WATERYR_LU[a_date.month]) for a_date in orig_dates])
+    water_dates = np.array([a_date.replace(year=a_date.year + WATERYR_LU[a_date.month])
+                            for a_date in orig_dates])
     water_slice = date2num(water_dates, kwargs['units'], kwargs['calen'])
     newmasks = []
     for z in omasks:
