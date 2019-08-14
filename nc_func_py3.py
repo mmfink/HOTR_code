@@ -183,7 +183,7 @@ def clipindex_fromXY(full_uleft, full_lright, uleft, lright, stepx, stepy=None):
 
     returns list of integer index numbers of the smaller extent.
     """
-    if stepy == None:
+    if stepy is None:
         stepy = stepx
 
     clip_idx_x1 = int(round((uleft[0] - full_uleft[0]) / stepx))

@@ -43,7 +43,7 @@ arglist = [(outbbox[0], outbbox[1]), cell, (cell * -1)]
 def iname(prefix, pattern):
     """ yeah, this is a lame function """
     name = pattern.replace("($var)", prefix)
-    return(name)
+    return name
 
 def calc_seasonal(var, season, nc_name, calc_type, years, time="time"):
     """ Get simple seasonal summaries from netCDF file. Use of water-year is assumed.
@@ -71,7 +71,7 @@ def calc_seasonal(var, season, nc_name, calc_type, years, time="time"):
     hmask = wy.watyrmask(dateRng, mydates, years, season, **mwargs)
     calcary = nc_func.calc_it(ddata, hmask, calc_type)
     outary = np.mean(calcary, axis=0)
-    return(outary)
+    return outary
 
 def iter_blocks(ary, years):
     """ iterator for 1-year chunk sizes of daily data
@@ -82,7 +82,6 @@ def iter_blocks(ary, years):
     """
     rows = ary.shape[1]
     cols = ary.shape[2]
-    depth = ary.shape[0]
     unique_yrs, indices = np.unique(years, return_index=True)
 
     for i in range(0, len(unique_yrs)):
@@ -183,7 +182,7 @@ def growingdegrees(nc_name, var, base, time="time"):
         else:
             chkary = np.ma.concatenate((chkary, sumary), axis=0)
     outary = np.mean(chkary, axis=0, dtype=np.float)
-    return(outary)
+    return outary
 
 #%%#
 

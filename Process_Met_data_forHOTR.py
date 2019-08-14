@@ -63,8 +63,8 @@ import nc_func_py3 as nc_func
 session_dir = r"E:\Climate\metdata"
 outFolder = "Derived"
 outdir = os.path.join(session_dir, outFolder)
- var_dict = {"pr":"precipitation_amount", "tmmn":"air_temperature",
-             "tmmx":"air_temperature", "pet":"potential_evapotranspiration"}
+var_dict = {"pr":"precipitation_amount", "tmmn":"air_temperature",
+            "tmmx":"air_temperature", "pet":"potential_evapotranspiration"}
 hYrs = range(1994, 2015, 1)
 cell = 0.041666667
 inbbox = [-124.7666666, 49.4, -67.0583333, 25.06666667]
@@ -80,11 +80,11 @@ def extractvars(nc_name, clip, var):
     """Return a subsetted numpy masked array from the nc file """
     dset = Dataset(nc_name)
     dvar = dset.variables[var]
-    ary = dvar[:, clip_idx[3]:clip_idx[1], clip_idx[0]:clip_idx[2]]
+    ary = dvar[:, clip[3]:clip[1], clip[0]:clip[2]]
     if var == "air_temperature":
         ary = np.subtract(ary, 273.15) #Convert K to C
     dset.close()
-    return(ary)
+    return ary
 
 if not os.path.exists(outdir):
     os.makedirs(outdir)
@@ -126,7 +126,7 @@ for pfx in filepfx:
     else:
         meta = "Daily reference evapotranspiration (short grass) in mm, from gridded surface meteorological data."
     kwargs = {"varname": var_dict[pfx], "units": tUnits, "calendar": tCalen,
-            "metadatastr": meta}
+              "metadatastr": meta}
     #Save as new netCDF with an unlimited time dimension
     nc_func.new_nc(clipData, tData, ltSlice, lnSlice, outnc, **kwargs)
 
