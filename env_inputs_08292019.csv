@@ -1,0 +1,26 @@
+raster,label,type,note
+H:/DEM_etc/distance_to_nonhabitat.tif,distToNon,N,
+H:/DEM_etc/hab_nonhab_patches.tif,hab_nonpch,S,use COUNT not VALUE
+H:/DEM_etc/nearest_edge_type.tif,nearType,C,
+H:/Climate/gridMET_1994_2014_annual_GDD0.tif,GDD0,N,
+H:/Climate/gridMET_1994_2014_annual_GDD5.tif,GDD5,N,
+H:/Climate/gridMET_1994_2014_annual_pet.tif,PET,N,
+H:/Climate/gridMET_1994_2014_annual_pr.tif,ppt_yrly,N,
+H:/Climate/gridMET_1994_2014_summer_fall_pr.tif,ppt_sf,N,
+H:/Climate/gridMET_1994_2014_winter_spring_pr.tif,ppt_ws,N,
+H:/Climate/gridMET_1994_2014_summer_tmmx.tif,tmax,N,
+H:/DEM_etc/nlcd_patches.tif,nlcd_patch,S,use COUNT not VALUE
+H:/DEM_etc/grass_shrub_vs_non.tif,hab_non,B,use to distinguish patch type
+H:/DEM_etc/nlcd_lumped.tif,nlcd,C,use to distinguish patch type and as separate input
+H:/DEM_etc/HOTR_DEM_filled.tif,DEM,N,
+H:/DEM_etc/HOTR_TRI.tif,TRI,N,
+H:/DEM_etc/HOTR_Eastness.tif,eastness,N,
+H:/DEM_etc/HOTR_Northness.tif,northness,N,
+H:/DEM_etc/HOTR_TWI_mod.tif,TWI,N,watch for NULLs
+H:/Soils/sand_dwave.tif,sand,N,
+H:/Soils/ph_dwave.tif,ph,N,
+H:/Soils/om_dwave.tif,om,N,
+H:/Soils/bd_dwave.tif,bd,N,
+H:/Soils/clay_dwave.tif,clay,N,
+H:/Soils/Soils_depth_br.tif,depth,N,watch for NULLs
+H:/DEM_etc/HOTR_Dinf_slope.tif,slope,N,
