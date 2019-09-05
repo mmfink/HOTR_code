@@ -41,7 +41,7 @@ abspts <- shapefile("D:/GIS/Projects/HOTR/BTPD_abspts.shp", integer64="allow.los
 allpts <- rbind(prespts, abspts)
 
 # read in Environmental Inputs
-inputs <- fread("D:/GIS/Projects/HOTR/env_inputs_08292019.csv", sep = ",", nThread = 2)
+inputs <- fread("env_inputs_08292019.csv", sep = ",", nThread = 2)
 
 # Start parallel cluster of workers
 cl <- snow::makeCluster(24, type = 'SOCK')
@@ -94,11 +94,13 @@ onehot <- function(lbl, df){
 }
 
 # Run thru the inputs and extract values - this takes lots of time & memory
-outvals <- foreach(r=1:nrow(inputs), .packages = c("raster", "stringr", "foreign", "dplyr"),
+outvals <- foreach(r=1:nrow(inputs),
+                   .packages = c("raster", "stringr", "foreign", "dplyr"),
                    .combine = "cbind") %dopar%
   myextract(allpts, inputs[r, 1:3])
 
-# Naming only works for the Special types for some reason, so now have to name the rest
+# Naming only works for the Special types for some reason,
+# so now have to name the rest
 for(n in names(outvals)){
   if(str_detect(n, "result")){
     z <- str_extract_all(n, "[:digit:]")
@@ -116,7 +118,8 @@ outvals <- tibble::rownames_to_column(outvals, var = "ID")
 fwrite(outvals, file = "D:/GIS/Projects/HOTR/outvals_raw.csv", nThread = 7)
 
 # Make dummy variables and merge them back into the output
-outv_onehot <- foreach(r=1:nrow(inputs), .packages = c("ade4", "dplyr", "stringr"),
+outv_onehot <- foreach(r=1:nrow(inputs),
+                       .packages = c("ade4", "dplyr", "stringr"),
                        .combine = "cbind") %:%
   when(inputs$type[r] == "C") %dopar%
   onehot(inputs$label[r], outvals)
