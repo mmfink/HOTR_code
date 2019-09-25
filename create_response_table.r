@@ -9,7 +9,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 09/03/2019
+# Code Last Modified 09/24/2019
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -26,8 +26,8 @@
 # along with this program.  If not, see https://www.gnu.org/licenses/
 #############################################################################
 
-library(data.table)
 library(dplyr)
+library(data.table)
 library(raster)
 library(rgdal)
 library(foreign)
@@ -35,16 +35,20 @@ library(ade4)
 library(stringr)
 library(doSNOW)
 
+setwd('D:/GIS/Projects/HOTR')
 # point data
-prespts <- shapefile("D:/GIS/Projects/HOTR/BTPD_prespts.shp", integer64="allow.loss")
-abspts <- shapefile("D:/GIS/Projects/HOTR/BTPD_abspts.shp", integer64="allow.loss")
+prespts <- shapefile("BTPD_prespts.shp", integer64="allow.loss")
+abspts <- shapefile("BTPD_abspts.shp", integer64="allow.loss")
+prespts$response <- rep(1, times = length(prespts))
+abspts$response <- rep(0, times = length(abspts))
 allpts <- rbind(prespts, abspts)
+allpts$ID <- row.names(allpts)
 
 # read in Environmental Inputs
 inputs <- fread("env_inputs_08292019.csv", sep = ",", nThread = 2)
 
 # Start parallel cluster of workers
-cl <- snow::makeCluster(24, type = 'SOCK')
+cl <- snow::makeCluster(20, type = 'SOCK')
 registerDoSNOW(cl)
 
 # Function to extract correct values depending on type
@@ -115,7 +119,7 @@ for(n in names(outvals)){
 
 outvals <- tibble::rownames_to_column(outvals, var = "ID")
 # Save in case of disaster with the next bit
-fwrite(outvals, file = "D:/GIS/Projects/HOTR/outvals_raw.csv", nThread = 7)
+fwrite(outvals, file = "outvals_raw.csv", nThread = 7)
 
 # Make dummy variables and merge them back into the output
 outv_onehot <- foreach(r=1:nrow(inputs),
@@ -125,11 +129,11 @@ outv_onehot <- foreach(r=1:nrow(inputs),
   onehot(inputs$label[r], outvals)
 
 outvals <- bind_cols(outvals, outv_onehot)
-output <- sp::merge(allpts, outvals, by.x="ptID", by.y="ID")
+output <- sp::merge(allpts, outvals)
 
 # Release the cluster
 snow::stopCluster(cl)
 
-fwrite(output, file = "D:/GIS/Projects/HOTR/response.csv", nThread = 16)
+fwrite(as.data.frame(output), file = "response.csv", nThread = 16)
 # Note that shapefile output truncates the fieldnames
-shapefile(output, filename="D:/GIS/Projects/HOTR/allpts_response.shp", overwrite=TRUE)
+shapefile(output, filename="allpts_response.shp", overwrite=TRUE)
