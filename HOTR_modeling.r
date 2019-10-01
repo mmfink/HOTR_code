@@ -7,6 +7,7 @@ library(biomod2)
 
 #### Set some basic variables ####
 set.seed(824)
+cp <- 8 # number of cores/threads, adjust per platform
 source("HOTR_model_functions.r")
 pth <- "D:/GIS/Projects/HOTR/"
 
@@ -19,7 +20,7 @@ env_inputs <- paste0(pth, "env_inputs_08292019.csv") # List of raster environmen
 #### Read in and format the data ####
 inputs <- read.table(env_inputs, header=TRUE, sep=",",
                      stringsAsFactors=FALSE)
-respdata <- fread(file, header=TRUE, sep=",", nThread=6)
+respdata <- fread(file, header=TRUE, sep=",", nThread=cp)
 respdata <- respdata %>% tidyr::drop_na() #Strip any records with NA
 
 # randomly sample equal number of absence as there are presence
@@ -44,7 +45,7 @@ train_dat_tree[, c("nearType", "nlcd") := .(as.factor(nearType), as.factor(nlcd)
 #### Variable Selection ####
 # Would prefer to do this interactively, but here's an automated way for now
 # Start parallel cluster of workers
-cl <- snow::makeCluster(8, type = "SOCK") # !!! Likewise !!!
+cl <- snow::makeCluster(cp, type = "SOCK")
 registerDoSNOW(cl)
 
 y <- train_dat_G[, response]
@@ -61,9 +62,6 @@ bestvars_T <- bestvars_T %>%
   add_row(invar=unlist(vartbl[c(3,13), 1]),
           dev_exp=unlist(vartbl[c(3,13), 2]), keep=c(1,1)) %>%
   arrange(desc(dev_exp))
-
-# # Release the cluster so Biomod can do its thing
-# snow::stopCluster(cl)
 
 # save for posterity
 write.csv(bestvars_G, paste0(pth, "vars_to_keep_GLM_GAM.csv"))
@@ -118,7 +116,7 @@ myBiomodOptions <- BIOMOD_ModelingOptions(
               select = FALSE,
               knots = NULL,
               paraPen = NULL,
-              control = list(nthreads = 8, irls.reg = 0, epsilon = 1e-07, maxit = 200, trace = FALSE
+              control = list(nthreads = cp, irls.reg = 0, epsilon = 1e-07, maxit = 200, trace = FALSE
                              , mgcv.tol = 1e-07, mgcv.half = 15, rank.tol = 1.49011611938477e-08
                              , nlm = list(ndigit=7, gradtol=1e-06, stepmax=2, steptol=1e-04, iterlim=200, check.analyticals=0)
                              , optim = list(factr=1e+07), newton = list(conv.tol=1e-06, maxNstep=5, maxSstep=2, maxHalf=30, use.svd=0)
@@ -156,3 +154,45 @@ whoknows <- foreach(m=models,
 
 ########
 snow::stopCluster(cl)
+
+#### Ensemble Model ####
+# Don't want to run this until individual models are reviewed and tweaked as needed
+# But it will look something like this
+
+# myBiomodEM <- BIOMOD_EnsembleModeling(
+#   modeling.output = myBiomodModelOut,
+#   chosen.models = 'all',
+#   em.by='all',
+#   eval.metric = c('TSS'),
+#   eval.metric.quality.threshold = c(0.7),
+#   prob.mean = T,
+#   prob.cv = T,
+#   prob.ci = T,
+#   prob.ci.alpha = 0.05,
+#   prob.median = T,
+#   committee.averaging = T,
+#   prob.mean.weight = T,
+#   prob.mean.weight.decay = 'proportional' )
+########
+
+#### Model Projections ####
+# Projection over current conditions
+# FIXME: will need to (somehow?) relate the one-hot vars back to the rasters. UGH.
+# For now, just project BRT & RF
+beginCluster(n=cp)
+layerStk <- raster::stack(env_inputs$raster, quick=TRUE)
+names(layerStk) <- env_inputs$label
+endCluster()
+# ***A foreach loop that uses get_built_models & BIOMOD_Projection??***
+myBiomodProj <- BIOMOD_Projection(
+  modeling.output = myBiomodModelOut,
+  new.env = layerStk,
+  proj.name = "current_test",
+  selected.models = "all",
+  compress = TRUE,
+  build.clamping.mask = TRUE,
+  do.stack = FALSE,
+  keep.in.memory = FALSE,
+  omit.na = FALSE,
+  output.format = ".grd")
+########

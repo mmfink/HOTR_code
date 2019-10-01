@@ -68,7 +68,7 @@ numCorr <- function(dat, max_cor, dev_exp){
 
 ########
 modpar <- function(m, dat, vars, modopt_obj, otheropts){
-  if(m=="GAM"){  #FIXME: right now can only do random effects with GAM
+  if(m=="GAM"){  #NOTE: right now can only do random effects with GAM
     indat <- dat %>% dplyr::select(response, coords.x1, coords.x2, Grid_ID, unlist(vars))
   } else {
     indat <- dat %>% dplyr::select(response, coords.x1, coords.x2, unlist(vars))
