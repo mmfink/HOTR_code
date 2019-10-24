@@ -6,14 +6,16 @@ library(doSNOW) # !!! Adjust to however Summit does parallelization !!!
 library(biomod2)
 
 #### Set some basic variables ####
-set.seed(824)
+set.seed(717)
 cp <- 8 # number of cores/threads, adjust per platform
+
+pth <- "H:/HOTR_models/"
+setwd(pth)
 source("HOTR_model_functions.r")
-pth <- "D:/GIS/Projects/HOTR/"
 
 max_cor <- 0.7 # maximum allowable correlation between variables
 test_pct <- 0.25 # proportion of response data to use for testing
-file <- paste0(pth, "response_test.csv") # response table, from create_response_table.r
+file <- paste0(pth, "response.csv") # response table, from create_response_table.r
 env_inputs <- paste0(pth, "env_inputs_08292019.csv") # List of raster environmental inputs
 ########
 
