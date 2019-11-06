@@ -10,8 +10,8 @@ library(dplyr)
 
 pth <- "H:/HOTR_models/"
 setwd(pth)
-set.seed(3782)
-rnam <- "Oct22_full"
+set.seed(9832)
+rnam <- "Nov04_full"
 
 train_dat <- fread("training_data_seed717.csv", header=TRUE, sep=",")
 bestvars_T <- fread("vars_to_keep_RF_Oct22.csv", header=TRUE, sep=",")
@@ -41,25 +41,26 @@ cl <- snow::makeCluster(ncores, type = "SOCK")
 registerDoSNOW(cl)
 
 treeSubs <- ntrees/ncores
-indata <- train_dat[, response := as.factor(response)][, ..varT] #This will be a classification, not a regression
+#indata <- train_dat[, response := as.factor(response)][, ..varT] #This will be a classification, not a regression
+allcols <- c("response", varT)
+indata <- train_dat[, ..allcols][, nlcd := as.factor(nlcd)][, nearType := as.factor(nearType)][, response := as.factor(response)]
 
 rf.fit1 <- foreach(tree = rep(treeSubs,ncores),
                    .combine = randomForest::combine,
                    .packages = c("randomForest", "data.table"),
                    .multicombine = TRUE) %dopar% {
                      randomForest(indata,
-                                  y=train_dat[, response],
+                                  y=indata[, response],
                                   importance=TRUE,
                                   ntree=tree,
                                   mtry=mt,
-                                  #strata = factor(c(0,1)),
                                   #strata = train_dat[, Grid_ID],
                                   #sampsize = sampSizeVec,
                                   replace = TRUE,
                                   norm.votes = TRUE)
                    }
 
-saveRDS(rf.fit1, paste0(outnam, ".rds"), version = 3)
+saveRDS(rf.fit1, paste0(outnam, ".rds"))
 impvals <- importance(rf.fit1)
 fwrite(impvals, file = paste0(outnam, "_varImp.txt"), row.names = TRUE)
 varImpPlot(rf.fit1)
@@ -67,9 +68,21 @@ varImpPlot(rf.fit1)
 snow::stopCluster(cl)
 ##########
 
-##### Boosted Regression Tree #####
+##### Boosted Regression Tree ##### ##10/28/2019 runs on Model Server##
 library(gbm)
 
+outnam <- paste0("BRT_", rnam)
+bestvars_T <- fread("vars_to_keep_BRT_Oct28.csv", header=TRUE, sep=",")
+varT <- bestvars_T$invar[bestvars_T$keep==1]
+allcols <- c("response", varT)
+indata <- train_dat[, ..allcols][, nlcd := as.factor(nlcd)][, nearType := as.factor(nearType)]
+
+# the following settings are from multiple fitting steps in SAHM (which gets thru model fitting then dies)
+brt.fit1 <- gbm(response~., data = indata, n.trees = 5000, interaction.depth = 20, shrinkage = 0.1049,
+                bag.fraction = 0.75, cv.folds = 3, verbose = TRUE, class.stratify.cv = TRUE, n.cores = 20)
+
+saveRDS(brt.fit1, paste0(outnam, ".rds"))
+summary(brt.fit1)
 
 ##########
 
@@ -90,91 +103,121 @@ f_glm <- as.formula(paste("response ~", q, sep = " "))
 
 glmm.fit1 <- glmer(f_glm, data = indata, family = "binomial", control = glmerControl(optimizer = "bobyqa"), nAGQ = 0)
 
-saveRDS(glmm.fit1, paste0(outnam, ".rds"), version = 3)
+saveRDS(glmm.fit1, paste0(outnam, ".rds"))
 summary(glmm.fit1)
 
 ##########
 
-##### Generalized Additive Mixed Model #####
-library(gamm4)
+##### Generalized Linear Model ##### ## Nov 4, 2019 runs on desktop in ~1 minute (!)
+# no random effects
+outnam <- paste0("GLM_", rnam)
+bestvars_G <- fread("vars_to_keep_GLM_GAM.csv", header=TRUE, sep=",")
+varG <- bestvars_G$invar[bestvars_G$keep==1]
+allcols <- c("response", varG)
+indata <- train_dat[, ..allcols]
+f_glm2 <- biomod2::makeFormula(respName = "response",
+                              explVar = head(indata[, ..varG]),
+                              type = "simple",
+                              interaction.level = 0)
+q <- str_c(c(as.character(f_glm2[3]), "TWI:clay", "GDD5:clay", "ppt_sf:clay", "ppt_ws:clay"), collapse = " + ")
+f_glm2 <- as.formula(paste("response ~", q, sep = " "))
 
-outnam <- paste0("GAMM4_", rnam)
-# Don't try to smooth the binary variables
-varSm <- varG[str_which(varG, "nlcd\\.|nearType\\.|hab_non", negate = TRUE)]
-varOther <- varG[str_which(varG, "nlcd\\.|nearType\\.|hab_non")]
-f_gam <- biomod2::makeFormula(respName = 'response',
-                     explVar = head(indata[, ..varSm]),
-                     type = "s_smoother", interaction.level = 0)
-q <- str_c(c(as.character(f_gam[3]), varOther, "TWI:clay", "GDD5:clay", "ppt_sf:clay", "ppt_ws:clay"), collapse = " + ")
-q <- str_remove(q, "1 \\+ ")
-f_gam <- as.formula(paste("response ~", q, sep = " "))
+glm.fit1 <- glm(f_glm2, data = indata, family = "binomial")
 
-gamm.fit1 <- gamm4(f_gam, data = indata, random = ~(1|Grid_ID), family = "binomial")
+saveRDS(glm.fit1, paste0(outnam, ".rds"), version = 3)
+summary(glm.fit1)
 
-saveRDS(gamm.fit1, paste0(outnam, ".rds"), version = 3)
-summary(gamm.fit1)
-##########
+# ##### Generalized Additive Mixed Model ##### ##10/28/2019 - this runs for days and days and never ends##
+# library(gamm4)
+#
+# outnam <- paste0("GAMM4_", rnam)
+# # Don't try to smooth the binary variables
+# varSm <- varG[str_which(varG, "nlcd\\.|nearType\\.|hab_non", negate = TRUE)]
+# varOther <- varG[str_which(varG, "nlcd\\.|nearType\\.|hab_non")]
+# f_gam <- biomod2::makeFormula(respName = 'response',
+#                      explVar = head(indata[, ..varSm]),
+#                      type = "s_smoother", interaction.level = 0)
+# q <- str_c(c(as.character(f_gam[3]), varOther, "TWI:clay", "GDD5:clay", "ppt_sf:clay", "ppt_ws:clay"), collapse = " + ")
+# q <- str_remove(q, "1 \\+ ")
+# f_gam <- as.formula(paste("response ~", q, sep = " "))
+#
+# gamm.fit1 <- gamm4(f_gam, data = indata, random = ~(1|Grid_ID), family = "binomial")
+#
+# saveRDS(gamm.fit1, paste0(outnam, ".rds"))
+# summary(gamm.fit1)
+# ##########
 
-##### Evaluation Stats #####
-library(ROCR)
-library(PresenceAbsence) # for Kappa
+##### Generalized Additive Mixed Model ##### ##10/29/2019 Runs on Model Server##
+library(mgcv)
+library(parallel)
 
-rf.mod <- readRDS(paste0(pth, "RF_Oct21_full.rds"))
-p_train <- as.vector(rf.mod$votes[,2])
-pred_train <- prediction(p_train, rf.mod$y)
-AUC <- performance(pred_train, measure = "auc")@y.values[[1]]
-plot(performance(pred_train, "tpr", "fpr"), lwd= 3, col="red", main="RF_Oct21_full AUC")
-sens <- mean(performance(pred_train, measure = "sens")@y.values[[1]])
-spec <- mean(performance(pred_train, measure = "spec")@y.values[[1]])
-TSS <- sens + spec - 1
-##########
+outnam <- paste0("BAM_", rnam)
+ncores <- 14 # do not exceed actual number of cores
+cl <- parallel::makeCluster(ncores)
 
-##### Raster Creation #####
-library(raster)
+#No random effects version
+f_gam <- as.formula("response ~ s(TRI, k=3) + s(DEM, k=3) + s(GDD5, k=3) +
+                    s(ppt_sf, k=3) + s(ph, k=3) + s(TWI, k=3) + s(bd, k=3) +
+                    s(ppt_ws, k=3) + s(clay, k=3) + s(om, k=3) + s(eastness, k=3) +
+                    s(depth, k=3) + s(northness, k=3) + s(distToNon, k=3) +
+                    s(nlcd_patch, k=3) + nlcd.Grassland + hab_non +
+                    nlcd.Forest + nearType.DevelOpen + nearType.Wetland +
+                    nearType.Forest + nearType.Cropland + nlcd.Developed + nearType.Other +
+                    nlcd.Wetland + nlcd.Other + nlcd.Water + nlcd.DevelOpen +
+                    nearType.Developed + nlcd.PastureHay + TWI:clay + GDD5:clay +
+                    ppt_sf:clay + ppt_ws:clay")
 
-tilebuilder <- function(raster, size = 1000, overlap = NULL, out = c('data.frame', 'list')){
-  # From Rafael Wüest, 10/19/2019: sdm_parallel.html
-  # 'size' is tile size in linear map units (e.g., size = 3000 is a tile 3,000m on a side)
-  out <- match.arg(out)
-  # get raster extents
-  xmin <- xmin(raster)
-  xmax <- xmax(raster)
-  ymin <- ymin(raster)
-  ymax <- ymax(raster)
-  xmins <- c(seq(xmin ,xmax, by = size))
-  ymins <- c(seq(ymin, ymax, by = size))
-  exts <- expand.grid(xmin = xmins, ymin = ymins)
-  exts$ymax <- exts$ymin + size
-  exts$xmax <- exts$xmin + size
-  # if overlapped tiles are requested, create new columns with buffered extents
-  if (!is.null(overlap)){
-    exts$yminb <- exts$ymin
-    exts$xminb <- exts$xmin
-    exts$ymaxb <- exts$ymax
-    exts$xmaxb <- exts$xmax
-    t1 <- (exts$ymin - overlap) >= ymin
-    exts$yminb[t1] <- exts$ymin[t1] - overlap
-    t2 <- (exts$xmin - overlap) >= xmin
-    exts$xminb[t2] <- exts$xmin[t2]-overlap
-    t3 <- (exts$ymax + overlap) <= ymax
-    exts$ymaxb[t3] <- exts$ymax[t3] + overlap
-    t4 <- (exts$xmax + overlap) <= xmax
-    exts$xmaxb[t4] <- exts$xmax[t4] + overlap
-  }
-  exts$tile <- 1:nrow(exts)
-  if (out == 'list') {
-    lapply(exts$tile, function(x) extent(unlist(exts[x, c('xmin', 'xmax', 'ymin', 'ymax')])))
-  } else {
-    exts
-  }
-}
+bestvars_G <- fread("vars_to_keep_GLM_GAM.csv", header=TRUE, sep=",")
+varG <- bestvars_G$invar[bestvars_G$keep==1]
+allcols <- c("response", varG)
+indata <- train_dat[, response := as.factor(response)][, ..allcols]
+bip <- binomial(link = "logit")
 
-env_inputs <- fread("env_inputs_10022019.csv", header=TRUE, sep=",")
-# also - "onehot_rasters.csv"
-# then pair down list to only those inputs used in each model.
-ncores <- (parallel::detectCores()) - 1
-beginCluster(n=ncores)
-layerStk <- raster::stack(env_inputs$raster, quick=TRUE)
-names(layerStk) <- env_inputs$label
-endCluster()
+gam_fit1 <- bam(f_gam, family = bip, data = indata, chunk.size = 10000,
+                cluster = cl)
+
+saveRDS(gam_fit1, paste0(outnam, ".rds"))
+summary(gam_fit1)
+
+### 11/04/2019 after running gam.check, decided to alter some k values in formula
+f_gam2 <- as.formula("response ~ s(TRI, k = 3) + s(DEM, k = 5) + s(GDD5, k = 5) + s(ppt_sf,
+    k = 5) + s(ph, k = 3) + s(TWI, k = 3) + s(bd, k = 5) + s(ppt_ws,
+    k = 5) + s(clay, k = 10) + s(om, k = 3) + s(eastness, k = 3) +
+    s(depth, k = 5) + s(northness, k = 3) + s(distToNon, k = 3) +
+    s(nlcd_patch, k = 3) + nlcd.Grassland + hab_non + nlcd.Forest +
+    nearType.DevelOpen + nearType.Wetland + nearType.Forest +
+    nearType.Cropland + nlcd.Developed + nearType.Other + nlcd.Wetland +
+    nlcd.Other + nlcd.Water + nlcd.DevelOpen + nearType.Developed +
+    nlcd.PastureHay + TWI:clay + GDD5:clay + ppt_sf:clay + ppt_ws:clay")
+
+gam_fit2 <- bam(f_gam2, family = bip, data = indata, chunk.size = 10000,
+                cluster = cl)
+
+saveRDS(gam_fit2, paste0(outnam, ".rds"))
+summary(gam_fit2)
+
+# #Random effects version ##runs out of memory##
+# f_gam2 <- as.formula("response ~ s(TRI, k=3, bs='cr') + s(DEM, k=3, bs='cr') + s(GDD5, k=3, bs='cr') +
+#                     s(ppt_sf, k=3, bs='cr') + s(ph, k=3, bs='cr') + s(TWI, k=3, bs='cr') + s(bd, k=3, bs='cr') +
+#                     s(ppt_ws, k=3, bs='cr') + s(clay, k=3, bs='cr') + s(om, k=3, bs='cr') + s(eastness, k=3, bs='cr') +
+#                     s(depth, k=3, bs='cr') + s(northness, k=3, bs='cr') + s(distToNon, k=3, bs='cr') +
+#                     s(nlcd_patch, k=3, bs='cr') + nlcd.Grassland + hab_non +
+#                     nlcd.Forest + nearType.DevelOpen + nearType.Wetland +
+#                     nearType.Forest + nearType.Cropland + nlcd.Developed + nearType.Other +
+#                     nlcd.Wetland + nlcd.Other + nlcd.Water + nlcd.DevelOpen +
+#                     nearType.Developed + nlcd.PastureHay + TWI:clay + GDD5:clay +
+#                     ppt_sf:clay + ppt_ws:clay + s(Grid_ID, bs = 're')")
+#
+# allcols <- c("response", "Grid_ID", varG)
+# indata <- train_dat[, response := as.factor(response)][, Grid_ID := as.factor(Grid_ID)][, ..allcols]
+# ncores <- 10 # ran out of memory at 14
+# cl <- parallel::makeCluster(ncores)
+#
+# gam_fit2 <- bam(f_gam2, family = bip, data = indata, chunk.size = 45000,
+#                 cluster = cl, gc.level = 2)
+# outnam <- paste0("BAMre_", rnam)
+# saveRDS(gam_fit2, paste0(outnam, ".rds"))
+# summary(gam_fit2)
+
+parallel::stopCluster(cl)
 ##########
