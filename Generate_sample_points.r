@@ -1,8 +1,9 @@
 #############################################################################
 # Generate presence and absence points for Black-tailed prairie dog
+#
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 07/09/2019
+# Code Last Modified 09/23/2019
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -48,7 +49,7 @@ mysample <- function(inpoly, samps){
   return(outpts)
 }
 
-setwd('D:/Projects/HOTR')
+setwd('D:/GIS/Projects/HOTR')
 # shapefile of presence polygons. Already clipped to be within backpolys
 pres_shp <- "pdog_prespolys.shp"
 # shapefile of blocks where all points will be generated
@@ -66,7 +67,7 @@ prespolys <- mutate(prespolys,
 
 # We want the number of absence points to be within the same order of magnitude
 tot_pres <- sum(prespolys$Sampnum)
-# 3x extra created to allow for subsampling as necessary
+# 3x extra created to allow for removal of NAs and subsampling as necessary
 tot_abs <- (10 ^ (ceiling(log10(tot_pres))) * 3)
 
 # Do not want absence pts generated in presence polys
@@ -101,7 +102,12 @@ abspts <- foreach(p=1:nrow(bpoly_clip),
 
 abspts <- st_join(st_as_sf(abspts, crs = st_crs(backpolys)), st_as_sf(backpolys)) %>%
   select(block_id)
-st_write(abspts, "BTPD_abspts.shp")
+# Remove any absence point that is within *500m* of a presence point.
+# FIXME: this takes hours & hours to run. Must be a better way.
+too_close <- st_is_within_distance(abspts, prespts_out, 500)
+abspts_idx <- which(lengths(too_close) == 0)
+abspts_out <- abspts[abspts_idx, ]
+st_write(abspts_out, "BTPD_abspts.shp")
 
 # Release the cluster
 snow::stopCluster(cl)
