@@ -1,6 +1,6 @@
 ##############################################################################
 # Fit Multiple Species Distribution Models
-# This uses the response table already created in create_response_table.r
+# This uses the data tables already created in Variable_selection.r
 # Separate code chunks create model objects for:
 #    Generalized Linear Mixed Model (GLMM)
 #    Random Forest (RF)

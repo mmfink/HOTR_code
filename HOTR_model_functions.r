@@ -1,7 +1,34 @@
+##############################################################################
+# Functions called by other scripts in the HOTR_code repository
+#
+# Michelle M. Fink, michelle.fink@colostate.edu
+# Colorado Natural Heritage Program, Colorado State University
+# Code Last Modified 10/03/2019
+#
+# Code licensed under the GNU General Public License version 3.
+# This script is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see https://www.gnu.org/licenses/
+#############################################################################
+
 #### Parameter reduction functions ####
+# This code is based on Marian Talbert’s code in PairsExplore.r and related
+# modules in the VisTrails-SAHM software, Copyright (C) 2010-2012, USGS
+# Fort Collins Science Center. No endorsement or promotion of my changes is implied.
+# https://www.sciencebase.gov/catalog/folder/503fbe63e4b09851b69ab463
+# https://github.com/talbertc-usgs/sahm
+
 require(gam)
 require(dplyr)
-require(biomod2)
 
 comb <- function(x, ...) {
   #https://stackoverflow.com/questions/19791609/saving-multiple-outputs-of-foreach-dopar-loop
@@ -33,6 +60,7 @@ devianceExp <- function(dat, y, vars){
 
 numCorr <- function(dat, max_cor, dev_exp){
   # dat has to be just the numeric input vars, nothing else
+  # TODO: Sure would be nice to figure out how to parallelize this
   cmat <- cor(dat, use = "pairwise.complete.obs")
   smat <- cor(dat, method = "spearman", use = "pairwise.complete.obs")
 
@@ -67,28 +95,3 @@ numCorr <- function(dat, max_cor, dev_exp){
 }
 
 ########
-modpar <- function(m, dat, vars, modopt_obj, otheropts){
-  if(m=="GAM"){  #NOTE: right now can only do random effects with GAM
-    indat <- dat %>% dplyr::select(response, coords.x1, coords.x2, Grid_ID, unlist(vars))
-  } else {
-    indat <- dat %>% dplyr::select(response, coords.x1, coords.x2, unlist(vars))
-  }
-  if(m=="BRT") m <- "GBM"
-  bmdat <- BIOMOD_FormatingData(resp.var = as.data.frame(indat[, 1]),
-                                expl.var = as.data.frame(indat[, 4:ncol(indat)]),
-                                resp.xy = as.data.frame(indat[, 2:3]),
-                                resp.name = "response")
-
-  bmOut <- BIOMOD_Modeling(bmdat, models = m,
-                           models.options = modopt_obj,
-                           NbRunEval = unlist(otheropts[1]),
-                           DataSplit = unlist(otheropts[2]),
-                           models.eval.meth = unlist(otheropts[3]),
-                           SaveObj = TRUE,
-                           modeling.id = paste0(m, "testing"))
-
-  capture.output(get_evaluations(bmOut),
-                 file=file.path(paste0(m,"_evaluation.txt")))
-  capture.output(get_variables_importance(bmOut),
-                 file=file.path(paste0(m,"_variable_importance.txt")))
-}
