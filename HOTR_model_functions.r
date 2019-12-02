@@ -3,7 +3,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 10/03/2019
+# Code Last Modified 12/02/2019
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -29,6 +29,7 @@
 
 require(gam)
 require(dplyr)
+require(raster)
 
 comb <- function(x, ...) {
   #https://stackoverflow.com/questions/19791609/saving-multiple-outputs-of-foreach-dopar-loop
@@ -94,4 +95,54 @@ numCorr <- function(dat, max_cor, dev_exp){
   return(vartbl)
 }
 
+########
+
+#### Raster tiling and prediction functions ####
+tilebuilder <- function(raster, size = 100000, overlap = NULL, out = c('data.frame', 'list')){
+  # From Rafael Wüest, Swiss Federal Research Institute WSL, 10/19/2019: personal communication
+  # 'size' is tile size in linear map units (e.g., size = 3000 is a tile 3,000m on a side)
+  out <- match.arg(out)
+  # get raster extents
+  xmin <- xmin(raster)
+  xmax <- xmax(raster)
+  ymin <- ymin(raster)
+  ymax <- ymax(raster)
+  xmins <- c(seq(xmin ,xmax, by = size))
+  ymins <- c(seq(ymin, ymax, by = size))
+  exts <- expand.grid(xmin = xmins, ymin = ymins)
+  exts$ymax <- exts$ymin + size
+  exts$xmax <- exts$xmin + size
+  # if overlapped tiles are requested, create new columns with buffered extents
+  if (!is.null(overlap)){
+    exts$yminb <- exts$ymin
+    exts$xminb <- exts$xmin
+    exts$ymaxb <- exts$ymax
+    exts$xmaxb <- exts$xmax
+    t1 <- (exts$ymin - overlap) >= ymin
+    exts$yminb[t1] <- exts$ymin[t1] - overlap
+    t2 <- (exts$xmin - overlap) >= xmin
+    exts$xminb[t2] <- exts$xmin[t2]-overlap
+    t3 <- (exts$ymax + overlap) <= ymax
+    exts$ymaxb[t3] <- exts$ymax[t3] + overlap
+    t4 <- (exts$xmax + overlap) <= xmax
+    exts$xmaxb[t4] <- exts$xmax[t4] + overlap
+  }
+  exts$tile <- 1:nrow(exts)
+  if (out == 'list') {
+    lapply(exts$tile, function(x) extent(unlist(exts[x, c('xmin', 'xmax', 'ymin', 'ymax')])))
+  } else {
+    exts
+  }
+}
+
+raspred <- function(tile_n, model, lyrnames){
+  fname <- paste0("tile_", as.character(tile_n), ".tif")
+  oname <- paste0("RF_Oct22_", as.character(tile_n), ".tif")
+  ras <- brick(fname)
+  names(ras) <- lyrnames
+  outras <- raster::predict(ras, model=model, type = "prob", index = 2,
+                            filename = oname, format = "GTiff", overwrite = TRUE,
+                            options = c("COMPRESS=LZW", "TFW=YES", "BIGTIFF=YES"))
+  return(outras)
+}
 ########
