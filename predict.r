@@ -1,11 +1,33 @@
-##### Raster Creation #####
-# Work In Progress #
+##############################################################################
+# Predict various models to full study area and write to raster
+# Requires functions in the HOTR_model_functions.r file
+#
+# Michelle M. Fink, michelle.fink@colostate.edu
+# Colorado Natural Heritage Program, Colorado State University
+# Code Last Modified 12/04/2019
+#
+# Code licensed under the GNU General Public License version 3.
+# This script is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see https://www.gnu.org/licenses/
+#############################################################################
+
 library(data.table)
 library(stringr)
 library(raster)
 library(rgdal)
-#library(gbm)
+library(gbm)
 library(randomForest)
+library(lme4)
 library(doSNOW)
 
 pth <- "H:/HOTR_models/"
@@ -18,23 +40,26 @@ ncores <- 16  # Set to number of physical cores, not logical processors
 gopts <- c("COMPRESS=LZW", "TFW=YES", "NUM_THREADS=4", "BIGTIFF=YES")
 
 ### Predict each model - have to do one at a time ###
-#BRT1 <- "BRT_Oct28_full.rds"
-RF2 <- "RF_Oct22_full.rds"
+modfile <- "RF_Oct22_full.rds"  #"BRT_Oct28_full.rds" "GLMER_Oct22_full.rds"
 
 # Load all raster names to start
 some_inputs <- fread("env_inputs_11252019.csv", header = TRUE, sep = ",")
 add_inputs <- fread("onehot_rasters.csv", header = TRUE, sep = ",")
 env_inputs <- rbind(some_inputs[, .(raster, label)], add_inputs[, .(raster, label)])
 
-# Pair down list to only those inputs used in each model.
-# How to do this changes with model type
+## Pair down list to only those inputs used in each model. ##
+# How to do this changes with model type. Uncomment the correct one.
 # - Random Forest
-mod <- readRDS(paste0(pth,RF2))
+mod <- readRDS(paste0(pth,modfile))
 subdf <- env_inputs[label %in% names(mod$forest$ncat)] #RF
 
 # - Boosted Regression Tree
-#mod <- readRDS(paste0(pth,BRT1))
+#mod <- readRDS(paste0(pth,modfile))
 #subdf <- env_inputs[label %in% mod$var.names] #BRT
+
+# - Generalized Linear Mixed Model
+#mod <- readRDS(file.path(pth,modfile))
+#subdf <- env_inputs[label %in% names(mod@frame)] #GLMM
 
 ### Only need to run tilebuilder once ###
 tiles_index <- tilebuilder(raster = raster(env_inputs$raster[1]), out = 'data.frame')
@@ -53,7 +78,7 @@ names(layerStk) <- subdf$label
 cl <- snow::makeCluster(ncores, type = "SOCK")
 registerDoSNOW(cl)
 
-# Create the raster tiles
+## Create the raster tiles ##
 foreach(i_tile = 1:nrow(tiles_index), .packages = "raster") %dopar% {
   ext_i <- extent(tiles_index$xmin[i_tile], tiles_index$xmax[i_tile],
                   tiles_index$ymin[i_tile], tiles_index$ymax[i_tile])
@@ -62,17 +87,22 @@ foreach(i_tile = 1:nrow(tiles_index), .packages = "raster") %dopar% {
                overwrite=TRUE, options = gopts)
 }
 
-# Use the tiles to create a prediction raster
+## Use the tiles to create a prediction raster ##
+# Make sure you're using the correct name and package
+tile_prefix <- "GLMER_Oct22" # "RF_Oct22" "BRT_Oct28"
 pred_tiles <- foreach(i_tile = 1:nrow(tiles_index),
-                      .packages = c("raster", "randomForest")) %dopar% {
-  raspred(tiles_index$tile[i_tile], model = mod, lyrnames = subdf$label)
-}
+                      .packages = c("raster", "lme4")) %dopar% {  #"randomForest" "gbm"
+                        raspred(tiles_index$tile[i_tile], model = mod,
+                                lyrnames = subdf$label, oname = tile_prefix)
+                      }
 
 # Release cluster to free up memory
 snow::stopCluster(cl)
 
-# Merge the prediction tiles into single raster
-pred_tiles$filename <- str_replace(RF2, "rds", "tif")
+## Merge the prediction tiles into single raster ##
+# Now that cluster is released, can use more threads
+gopts <- c("COMPRESS=LZW", "TFW=YES", "NUM_THREADS=14", "BIGTIFF=YES")
+pred_tiles$filename <- str_replace(modfile, "rds", "tif")
 pred_tiles$format <- "GTiff"
 pred_tiles$options <- gopts
 

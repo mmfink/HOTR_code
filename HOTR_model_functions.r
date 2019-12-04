@@ -3,7 +3,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 12/02/2019
+# Code Last Modified 12/04/2019
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -135,14 +135,27 @@ tilebuilder <- function(raster, size = 100000, overlap = NULL, out = c('data.fra
   }
 }
 
-raspred <- function(tile_n, model, lyrnames){
-  fname <- paste0("tile_", as.character(tile_n), ".tif")
-  oname <- paste0("RF_Oct22_", as.character(tile_n), ".tif")
+raspred <- function(tile_i, model, lyrnames, oname){
+  # Each model type has its own prediction requirements.
+  # Uncomment the one you need before sourcing the file.
+  # TODO: it would be nice to make this more general.
+  fname <- paste0("tile_", as.character(tile_i), ".tif")
+  oname <- paste0(oname, as.character(tile_i), ".tif")
   ras <- brick(fname)
   names(ras) <- lyrnames
-  outras <- raster::predict(ras, model=model, type = "prob", index = 2,
-                            filename = oname, format = "GTiff", overwrite = TRUE,
-                            options = c("COMPRESS=LZW", "TFW=YES", "BIGTIFF=YES"))
+  opt <- c("COMPRESS=LZW", "TFW=YES", "BIGTIFF=YES")
+  ##Random Forest:
+  # outras <- raster::predict(ras, model=model, type = "prob", index = 2,
+  #                           filename = oname, format = "GTiff", overwrite = TRUE,
+  #                           options = opt)
+  ##Boosted Regression Tree:
+  # outras <- raster::predict(ras, model=model, index=1, filename=oname, na.rm=FALSE,
+  #                           format="GTiff", overwrite=TRUE, options=opt,
+  #                           n.trees=4998, type="response", single.tree=TRUE)
+  ##Generalized Linear Mixed Model
+  outras <- raster::predict(ras, model=model, index=1, filename=oname,
+                            format="GTiff", overwrite=TRUE, options=opt,
+                            type="response", re.form=NA)
   return(outras)
 }
 ########
