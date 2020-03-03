@@ -70,7 +70,7 @@ setwd(pth)
 set.seed(135)
 rnam <- "Mar03" #not currently used
 folds <- 10
-ntrees <- 2000
+ntrees <- 1000  #Lowering from 2000 to 1000 allows RF versions to run with 148 GB memory
 ncores <- 6 #if modeling server: 20
 
 train_data <- fread("training_data_seed655.csv", header=TRUE, sep=",")
@@ -139,6 +139,7 @@ cv_metrics <- foreach(i = 1:10,
 snow::stopCluster(cl)
 
 # TODO: I create a results table, but then don't save the table anywhere.
+# (except copy-paste into Excel)
 cvout <- data.table(cv=unlist(cv_metrics[,1]), AUC=unlist(cv_metrics[,2]),
                     TSS=unlist(cv_metrics[,3]), err_rate=unlist(cv_metrics[,4]),
                     kappa=unlist(cv_metrics[,5]), PCC=unlist(cv_metrics[,6]),
@@ -189,8 +190,50 @@ cvout
 tograph <- melt(cvout, id.vars = "cv", measure.vars = c(2:9), variable.name = "metric")
 qplot(factor(metric), value, data=tograph, geom="boxplot",
       xlab = "Performance Metric", main = "10-fold Cross-Validation for GLMER_alltypes_Mar02")
+######
 
-### Model 3) RF_alltypes_Mar02 ###
+### Model 3) RF_alltypes_onehot_Fe25 ###
+#Uses same data as the GLMMs
+
+allcols <- c("KFsplit", "response", varG)
+dat <- indata[, ..allcols][, response := as.factor(response)]
+
+cl <- snow::makeCluster(ncores, type = "SOCK") #lowering ncores doesn't help
+registerDoSNOW(cl)
+
+cv_metrics <- foreach(i = 1:10,
+                      .combine = "rbind",
+                      .packages = c("data.table", "randomForest", "PresenceAbsence", "ROCR")) %dopar% {
+                        datrain <- dat[KFsplit != i]
+                        datest <- dat[KFsplit == i]
+                        fit <- randomForest(datrain[, 3:23],
+                                  y=datrain[, response],
+                                  ntree=ntrees,
+                                  mtry=6,
+                                  replace = TRUE,
+                                  norm.votes = TRUE)
+                        evfit <- predict(fit, newdata=datest, type="prob",
+                                         norm.votes=TRUE)
+                        evdt <- data.table(prob=evfit[,2], resp=datest[, response])
+                        testEval(evdt, paste("fold", as.character(i)))
+                      }
+
+snow::stopCluster(cl)
+
+# See TODO above
+cvout <- data.table(cv=unlist(cv_metrics[,1]), AUC=unlist(cv_metrics[,2]),
+                    TSS=unlist(cv_metrics[,3]), err_rate=unlist(cv_metrics[,4]),
+                    kappa=unlist(cv_metrics[,5]), PCC=unlist(cv_metrics[,6]),
+                    Sensitivty=unlist(cv_metrics[,7]), Specificity=unlist(cv_metrics[,8]),
+                    Threshold=unlist(cv_metrics[,9]))
+
+cvout
+tograph <- melt(cvout, id.vars = "cv", measure.vars = c(2:9), variable.name = "metric")
+qplot(factor(metric), value, data=tograph, geom="boxplot",
+      xlab = "Performance Metric", main = "10-fold Cross-Validation for RF_alltypes_onehot_Feb25")
+######
+
+### Model 4) RF_alltypes_Mar02 ###
 # Uses factor NLCD instead of the one-hot variables for land use
 
 train_dataRF <- fread("training_data_seed655_forRF.csv", header=TRUE, sep=",")
@@ -202,7 +245,6 @@ names(kf) <- levels(indata$Grid_ID)
 kfdt <- data.table(Grid_ID=names(kf), KFsplit=kf, stringsAsFactors = TRUE)
 
 # Add the Split column to the dataset
-#Note that, with the same seed & number of records, splits are the same as for above dataset
 indata <- indata[kfdt, on=.(Grid_ID=Grid_ID)]
 
 bestvars_G <- fread("vars_to_keep_Mar02.csv", header=TRUE, sep=",")
@@ -213,7 +255,6 @@ dat <- indata[, ..allcols][, response := as.factor(response)][, nlcd := as.facto
 cl <- snow::makeCluster(ncores, type = "SOCK")
 registerDoSNOW(cl)
 
-# FIXME: The below very quickly uses all 147 GB of memory on modeling server
 cv_metrics <- foreach(i = 1:10,
                       .combine = "rbind",
                       .packages = c("data.table", "randomForest", "PresenceAbsence", "ROCR")) %dopar% {
@@ -244,3 +285,4 @@ cvout
 tograph <- melt(cvout, id.vars = "cv", measure.vars = c(2:9), variable.name = "metric")
 qplot(factor(metric), value, data=tograph, geom="boxplot",
       xlab = "Performance Metric", main = "10-fold Cross-Validation for RF_alltypes_Mar02")
+######
