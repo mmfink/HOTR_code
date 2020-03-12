@@ -1,7 +1,7 @@
 ---
 title: "Latest Iteration of HOTR model evaluation"
 author: "Michelle M. Fink"
-date: "03/03/2020"
+date: "03/10/2020"
 output:
   html_document:
     code_folding: hide
@@ -127,7 +127,7 @@ RF_all2 <- readRDS(paste0(pth,"RF_alltypes_Mar02_norm.rds"))
 
 GLM_cd <- readRDS(paste0(pth,"GLMER_climdirt_Feb25_norm.rds"))
 GLM_all <- readRDS(paste0(pth,"GLMER_alltypes_Feb25_norm.rds"))
-GLM_all2 <- readRDS(paste0(pth,"GLMER_alltypes_Feb25_norm.rds"))
+GLM_all2 <- readRDS(paste0(pth,"GLMER_alltypes_Mar02_norm.rds"))
 ```
 
 *Run each model through main evaluation function*
