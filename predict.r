@@ -1,10 +1,10 @@
 ##############################################################################
 # Predict various models to full study area and write to raster
-# Requires functions in the HOTR_model_functions.r file
+# Requires functions in the *HOTR_model_functions.r* file
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 12/04/2019
+# Code Last Modified 03/12/2020
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -66,6 +66,7 @@ tiles_index <- tilebuilder(raster = raster(env_inputs$raster[1]), out = 'data.fr
 # Tiles are in a rectangular matrix, but study area does not completely fill it.
 # Save tiles_index to a file, edit out those tiles that are all NAs
 fwrite(tiles_index, file="tiles_index.csv")
+
 ### Once the above has been done once, start from Here ###
 # Reload the edited file (went from 322 to 213 tiles)
 tiles_index <- fread("tiles_index.csv", header = TRUE, sep = ",")
@@ -83,17 +84,19 @@ foreach(i_tile = 1:nrow(tiles_index), .packages = "raster") %dopar% {
   ext_i <- extent(tiles_index$xmin[i_tile], tiles_index$xmax[i_tile],
                   tiles_index$ymin[i_tile], tiles_index$ymax[i_tile])
   fname <- file.path(pth, paste0("tile_", as.character(tiles_index$tile[i_tile]), ".tif"))
-  tile <- crop(layerStk, ext_i, filename=fname, format="GTiff",
-               overwrite=TRUE, options = gopts)
+  if(!file.exists(fname)){
+    tile <- crop(layerStk, ext_i, filename=fname, format="GTiff",
+                 overwrite=TRUE, options = gopts)
+  }
 }
 
 ## Use the tiles to create a prediction raster ##
-# Make sure you're using the correct name and package
-tile_prefix <- "GLMER_Oct22" # "RF_Oct22" "BRT_Oct28"
+# Make sure you're using the correct tile_prefix and package
+tile_prefix <- "GLMER_Oct22_" # "RF_Oct22_" "BRT_Oct28_"
 pred_tiles <- foreach(i_tile = 1:nrow(tiles_index),
-                      .packages = c("raster", "lme4")) %dopar% {  #"randomForest" "gbm"
+                      .packages = c("raster", "randomForest")) %dopar% {  #"randomForest" "gbm" "lme4"
                         raspred(tiles_index$tile[i_tile], model = mod,
-                                lyrnames = subdf$label, oname = tile_prefix)
+                                lyrnames = subdf$label, oname = tile_prefix, modtype = "RF")
                       }
 
 # Release cluster to free up memory
