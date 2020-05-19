@@ -3,7 +3,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 03/12/2020
+# Code Last Modified 05/19/2020
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -135,8 +135,20 @@ tilebuilder <- function(raster, size = 100000, overlap = NULL, out = c('data.fra
   }
 }
 
-raspred <- function(tile_i, model, lyrnames, oname, modtype){
-  fname <- paste0("tile_", as.character(tile_i), ".tif")
+maketiles <- function(tiles_index, rasterStack, gopts, i_tile){
+    ext_i <- extent(tiles_index$xmin[i_tile], tiles_index$xmax[i_tile],
+                    tiles_index$ymin[i_tile], tiles_index$ymax[i_tile])
+    fname <- paste0("tile_", as.character(tiles_index$tile[i_tile]), ".tif")
+    if(!file.exists(fname)){
+      tile <- crop(rasterStack, ext_i, filename=fname, format="GTiff",
+                   overwrite=TRUE, options = gopts)
+    }
+}
+
+raspred <- function(tile_i, tiles_pth=pth, model, lyrnames,
+                    oname, modtype){
+  fname <- file.path(tiles_pth,
+                     paste0("tile_", as.character(tile_i), ".tif"))
   oname <- paste0(oname, as.character(tile_i), ".tif")
   if(file.exists(oname)){
     outras <- raster(oname)
@@ -152,9 +164,10 @@ raspred <- function(tile_i, model, lyrnames, oname, modtype){
     }
     if(modtype == "BRT"){
       #Boosted Regression Tree:
+      #FIXME: the n.trees requirement makes this really hard to generalize
       outras <- raster::predict(ras, model=model, index=1, filename=oname, na.rm=FALSE,
                                 format="GTiff", overwrite=TRUE, options=opt,
-                                n.trees=4998, type="response", single.tree=TRUE)
+                                n.trees=20490, type="response", single.tree=FALSE)
     }
     if(modtype == "GLM"){
       #Generalized Linear Mixed Model

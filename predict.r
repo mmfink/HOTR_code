@@ -4,7 +4,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 03/12/2020
+# Code Last Modified 05/19/2020
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -32,34 +32,19 @@ library(doSNOW)
 
 pth <- "H:/HOTR_models/"
 setwd(pth)
-source("HOTR_model_functions.r")
+rasterOptions(tmpdir = "E:/MMF/temp")
 
-rasterOptions(tmpdir = "E:/MMF/temp",
-              chunksize = 5e+08)
-ncores <- 16  # Set to number of physical cores, not logical processors
+source("HOTR_model_functions.r")
+ncores <- 14  # physical cores = 16, setting to 14 prevents corruption of tile rasters
 gopts <- c("COMPRESS=LZW", "TFW=YES", "NUM_THREADS=4", "BIGTIFF=YES")
 
-### Predict each model - have to do one at a time ###
-modfile <- "RF_Oct22_full.rds"  #"BRT_Oct28_full.rds" "GLMER_Oct22_full.rds"
+# The model names
+BRTm <- "BRT_gbmholdout_50ktMay13.rds"
+GLMm <- "GLMER_May14_70pct.rds"
+RFm <- "RF_4800trees_May12.rds"
 
-# Load all raster names to start
-some_inputs <- fread("env_inputs_11252019.csv", header = TRUE, sep = ",")
-add_inputs <- fread("onehot_rasters.csv", header = TRUE, sep = ",")
-env_inputs <- rbind(some_inputs[, .(raster, label)], add_inputs[, .(raster, label)])
-
-## Pair down list to only those inputs used in each model. ##
-# How to do this changes with model type. Uncomment the correct one.
-# - Random Forest
-mod <- readRDS(paste0(pth,modfile))
-subdf <- env_inputs[label %in% names(mod$forest$ncat)] #RF
-
-# - Boosted Regression Tree
-#mod <- readRDS(paste0(pth,modfile))
-#subdf <- env_inputs[label %in% mod$var.names] #BRT
-
-# - Generalized Linear Mixed Model
-#mod <- readRDS(file.path(pth,modfile))
-#subdf <- env_inputs[label %in% names(mod@frame)] #GLMM
+# Load raster names
+env_inputs <- fread("env_inputs_04022020.csv", header = TRUE, sep = ",")
 
 ### Only need to run tilebuilder once ###
 tiles_index <- tilebuilder(raster = raster(env_inputs$raster[1]), out = 'data.frame')
@@ -70,43 +55,108 @@ fwrite(tiles_index, file="tiles_index.csv")
 ### Once the above has been done once, start from Here ###
 # Reload the edited file (went from 322 to 213 tiles)
 tiles_index <- fread("tiles_index.csv", header = TRUE, sep = ",")
+######
 
-# Make raster stack
-layerStk <- raster::stack(subdf$raster)
-names(layerStk) <- subdf$label
+### Make the raster tiles for each set of inputs ###
+# RF and BRT need these
+modR <- readRDS(file.path(pth,RFm))
+subdfR <- env_inputs[label %in% names(modR$forest$ncat)] #RF
+layerStk <- raster::stack(subdfR$raster)
+names(layerStk) <- subdfR$label
 
-# Start parallel cluster
 cl <- snow::makeCluster(ncores, type = "SOCK")
 registerDoSNOW(cl)
 
-## Create the raster tiles ##
 foreach(i_tile = 1:nrow(tiles_index), .packages = "raster") %dopar% {
-  ext_i <- extent(tiles_index$xmin[i_tile], tiles_index$xmax[i_tile],
-                  tiles_index$ymin[i_tile], tiles_index$ymax[i_tile])
-  fname <- file.path(pth, paste0("tile_", as.character(tiles_index$tile[i_tile]), ".tif"))
-  if(!file.exists(fname)){
-    tile <- crop(layerStk, ext_i, filename=fname, format="GTiff",
-                 overwrite=TRUE, options = gopts)
-  }
+  maketiles(tiles_index, layerStk, gopts, i_tile)
 }
 
-## Use the tiles to create a prediction raster ##
-# Make sure you're using the correct tile_prefix and package
-tile_prefix <- "GLMER_Oct22_" # "RF_Oct22_" "BRT_Oct28_"
-pred_tiles <- foreach(i_tile = 1:nrow(tiles_index),
-                      .packages = c("raster", "randomForest")) %dopar% {  #"randomForest" "gbm" "lme4"
-                        raspred(tiles_index$tile[i_tile], model = mod,
-                                lyrnames = subdf$label, oname = tile_prefix, modtype = "RF")
-                      }
-
-# Release cluster to free up memory
 snow::stopCluster(cl)
 
-## Merge the prediction tiles into single raster ##
+# GLM needs these.
+# Note: move the previously created tiles to another directory first
+modG <- readRDS(file.path(pth,GLMm))
+subdfG <- env_inputs[label %in% names(modG@frame)] #GLMM
+layerStk <- raster::stack(subdfG$raster)
+names(layerStk) <- subdfG$label
+
+cl <- snow::makeCluster(ncores, type = "SOCK")
+registerDoSNOW(cl)
+
+foreach(i_tile = 1:nrow(tiles_index), .packages = "raster") %dopar% {
+  maketiles(tiles_index, layerStk, gopts, i_tile)
+}
+
+snow::stopCluster(cl)
+######
+
+### Predict each model###
+## RF
+# Here's where the raster stack Tiles have been moved to
+tile_pth <- "H:/HOTR_models/RF_tiles"
+tile_prefix <- "RF_70pct_"
+
+cl <- snow::makeCluster(ncores, type = "SOCK")
+registerDoSNOW(cl)
+# this bit takes ~14.5 hours
+pred_tiles <- foreach(i_tile = 1:nrow(tiles_index),
+                      .packages = c("raster", "randomForest")) %dopar% {
+                        raspred(tiles_index$tile[i_tile], tiles_pth = tile_pth, model = modR,
+                                lyrnames = subdfR$label, oname = tile_prefix, modtype = "RF")
+                      }
+
+snow::stopCluster(cl)
+
+# Merge the prediction tiles into single raster
 # Now that cluster is released, can use more threads
 gopts <- c("COMPRESS=LZW", "TFW=YES", "NUM_THREADS=14", "BIGTIFF=YES")
-pred_tiles$filename <- str_replace(modfile, "rds", "tif")
+pred_tiles$filename <- str_replace(RFm, "rds", "tif")
 pred_tiles$format <- "GTiff"
 pred_tiles$options <- gopts
 
 out <- do.call(raster::merge, pred_tiles)
+
+## BRT
+modB <- readRDS(file.path(pth,BRTm))
+# not really necessary (same as RF), but good to remember how to read the BRT model
+subdfB <- env_inputs[label %in% modB$var.names] #BRT
+tile_prefix <- "BRT_70pct_"
+
+cl <- snow::makeCluster(ncores, type = "SOCK")
+registerDoSNOW(cl)
+
+pred_tiles <- foreach(i_tile = 1:nrow(tiles_index),
+                      .packages = c("raster", "gbm")) %dopar% {
+                        raspred(tiles_index$tile[i_tile], tiles_pth = tile_pth, model = modB,
+                                lyrnames = subdfB$label, oname = tile_prefix, modtype = "BRT")
+                      }
+
+snow::stopCluster(cl)
+
+pred_tiles$filename <- str_replace(BRTm, "rds", "tif")
+pred_tiles$format <- "GTiff"
+pred_tiles$options <- gopts
+
+out <- do.call(raster::merge, pred_tiles)
+
+## GLMM
+tile_pth <- "H:/HOTR_models/GLM_tiles"
+tile_prefix <- "GLMER_70pct_"
+
+cl <- snow::makeCluster(ncores, type = "SOCK")
+registerDoSNOW(cl)
+
+pred_tiles <- foreach(i_tile = 1:nrow(tiles_index),
+                      .packages = c("raster", "lme4")) %dopar% {
+                        raspred(tiles_index$tile[i_tile], tiles_pth = tile_pth, model = modG,
+                                lyrnames = subdfG$label, oname = tile_prefix, modtype = "GLM")
+                      }
+
+snow::stopCluster(cl)
+
+pred_tiles$filename <- str_replace(GLMm, "rds", "tif")
+pred_tiles$format <- "GTiff"
+pred_tiles$options <- gopts
+
+out <- do.call(raster::merge, pred_tiles)
+#####
