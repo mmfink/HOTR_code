@@ -4,7 +4,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 05/19/2020
+# Code Last Modified 05/21/2020
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -98,7 +98,7 @@ tile_prefix <- "RF_70pct_"
 
 cl <- snow::makeCluster(ncores, type = "SOCK")
 registerDoSNOW(cl)
-# this bit takes ~14.5 hours
+# this bit takes anywhere from ~14.5 hours to 2.5 days
 pred_tiles <- foreach(i_tile = 1:nrow(tiles_index),
                       .packages = c("raster", "randomForest")) %dopar% {
                         raspred(tiles_index$tile[i_tile], tiles_pth = tile_pth, model = modR,
