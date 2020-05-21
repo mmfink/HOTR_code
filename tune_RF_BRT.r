@@ -12,7 +12,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 05/19/2020
+# Code Last Modified 05/21/2020
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -248,4 +248,104 @@ snow::stopCluster(cl)
 twkRF3 <- predict(rf.fit3, newdata=twkdat, type="prob", norm.votes=TRUE)
 evRF3 <- data.table(prob=twkRF3[,2], resp=twkdat[, response])
 outRF3 <- testEval(evRF3, "RF_4800t_m9_n3")
-outRF3 # metrics are worse
+outRF3 # metrics are worse. RF_4800t_mtry9 wins.
+######
+
+### Boosted Regression Trees tuning ###
+# original model used gbm library:
+# brt.fit <- gbm(response~., data = indata, n.trees = 5000,
+#                 interaction.depth = 2, shrinkage = 0.11,
+#                 bag.fraction = 0.75, cv.folds = 3, verbose = TRUE,
+#                 class.stratify.cv = TRUE, n.cores = 6)
+
+## 1) use dismo::gbm.holdout to find optimal n.trees
+outnam <- paste0("BRT_holdout", rnam)
+indata <- train_data[, ..allcols][, nlcd := as.factor(nlcd)]
+
+brt.fit <- gbm.holdout(indata, gbm.x = c(2:14), gbm.y = 1,
+                       learning.rate = 0.11, tree.complexity = 2,
+                       n.trees = 5000, add.trees = 2000,
+                       train.fraction = 0.6)
+
+saveRDS(brt.fit, paste0(outnam, ".rds"))
+summary(brt.fit)
+# 20151 trees (hit default max of 20000).
+# Received warning that either learning.rate too low or max trees too low
+
+### Evaluate with Tweak data ###
+twkdat <- tweak_data[, ..allcols][, nlcd := as.factor(nlcd)]
+twkBRT1 <- predict(brt.fit, newdata=twkdat, n.trees=20151, type="response")
+evBRT1 <- data.table(prob=twkBRT1, resp=twkdat[, response])
+outBRT1 <- testEval(evBRT1, "BRT_20151trees")
+outBRT1 #performed better than original
+
+## 2) dismo does not expose parameters like minobsinnode & cv.fold,
+# so next tried package gbm3
+brt.fit2 <- gbm3::gbm(response~., data = indata,
+                      distribution = "bernoulli",
+                      n.trees = 20000,
+                      weights = rep(1, nrow(indata)),
+                      n.minobsinnode = 6, #default is 10
+                      interaction.depth = 2,
+                      shrinkage = 0.11,
+                      bag.fraction = 0.5,
+                      train.fraction = 0.6,
+                      cv.folds = 5,
+                      verbose = FALSE, #not desirable here
+                      class.stratify.cv = TRUE,
+                      par.details=gbmParallel(num_threads=ncores))
+#received warnings about shrinkage being to high (sigh)
+saveRDS(brt.fit2, paste0(outnam, ".rds"))
+gbm.perf(brt.fit2, method = "cv") #Suggests 10628 trees
+
+### Evaluate with Tweak data ###
+twkBRT2 <- predict(brt.fit2, newdata=twkdat, n.trees=20000, type="response")
+evBRT2 <- data.table(prob=twkBRT2, resp=twkdat[, response])
+outBRT2 <- testEval(evBRT2, "BRT_gbm3_20kt")
+outBRT2 #performed worse than original
+
+## 3) try lowering shrinkage
+outnam <- paste0("BRT_gbm3_08shrink", rnam)
+#using gbm3 and lowering shrinkage
+brt.fit3 <- gbm3::gbm(response~., data = indata,
+                      distribution = "bernoulli",
+                      n.trees = 25000,
+                      weights = rep(1, nrow(indata)),
+                      n.minobsinnode = 6, #default is 10
+                      interaction.depth = 2,
+                      shrinkage = 0.08,
+                      bag.fraction = 0.5,
+                      train.fraction = 0.6,
+                      cv.folds = 5,
+                      verbose = FALSE, #not desirable here
+                      class.stratify.cv = TRUE,
+                      par.details=gbmParallel(num_threads=ncores))
+#same warnings about shrinkage being to high
+saveRDS(brt.fit3, paste0(outnam, ".rds"))
+gbm.perf(brt.fit3, method = "cv") #Suggests 14130 trees
+
+### Evaluate with Tweak data ###
+twkBRT3 <- predict(brt.fit3, newdata=twkdat, n.trees=25000, type="response")
+evBRT3 <- data.table(prob=twkBRT3, resp=twkdat[, response])
+outBRT3 <- testEval(evBRT3, "BRT_gbm3_25kt_08sh")
+outBRT3 #even worse
+
+## 4) Never mind, going back to dismo
+outnam <- paste0("BRT_gbmholdout_50kt", rnam)
+brt.fit4 <- gbm.holdout(indata, gbm.x = c(2:14), gbm.y = 1,
+                        learning.rate = 0.11, tree.complexity = 2,
+                        n.trees = 20000, add.trees = 5000,
+                        max.trees = 50000,
+                        train.fraction = 0.6)
+
+saveRDS(brt.fit4, paste0(outnam, ".rds"))
+summary(brt.fit4)
+gbm.interactions(brt.fit4, mask.object = brt.fit4)
+# stopped at 20490 trees, looks like finally hit optimal number
+
+### Evaluate with Tweak data ###
+twkBRT4 <- predict(brt.fit4, newdata=twkdat, n.trees=20490, type="response")
+evBRT4 <- data.table(prob=twkBRT4, resp=twkdat[, response])
+outBRT4 <- testEval(evBRT4, "BRT_20490trees")
+outBRT4 #ever so slightly better than BRT_20151trees. stopping here.
+######
