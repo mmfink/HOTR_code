@@ -12,7 +12,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 05/21/2020
+# Code Last Modified 06/09/2020
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -348,4 +348,38 @@ twkBRT4 <- predict(brt.fit4, newdata=twkdat, n.trees=20490, type="response")
 evBRT4 <- data.table(prob=twkBRT4, resp=twkdat[, response])
 outBRT4 <- testEval(evBRT4, "BRT_20490trees")
 outBRT4 #ever so slightly better than BRT_20151trees. stopping here.
+######
+
+### Need a GLM using same 70% dataset as RF and BRT ###
+train_data <- fread(paste0(pth, "train_data_70pct.csv"), header=TRUE, sep=",")
+rnam <- "May14_70pct"
+outnam <- paste0("GLMER_", rnam)
+bestvars_G <- fread("vars_to_keep_Feb25.csv", header=TRUE, sep=",")
+varG <- bestvars_G$invar[bestvars_G$keep==1]
+allcols <- c("response", "Grid_ID", varG)
+indata <- train_data[, Grid_ID := as.factor(Grid_ID)][, ..allcols] #Grid_ID = random effect
+
+f_glm <- biomod2::makeFormula(respName = "response",
+                              explVar = head(indata[, ..varG]),
+                              type = "simple",
+                              interaction.level = 0)
+q <- str_c(c(as.character(f_glm[3]), "(1|Grid_ID)", "I(GDD5^2)", "TWI:ppt_ws", "TWI:ppt_sf", "GDD5:clay",
+             "ppt_sf:clay", "ppt_ws:clay"), collapse = " + ")
+f_glm <- as.formula(paste("response ~", q, sep = " "))
+
+# Note: error in most recent lme4 making optional args required
+# so glad I updated. :-/
+glmm.fit <- glmer(f_glm, data = indata,
+                  family = "binomial",
+                  control = glmerControl(optimizer = "bobyqa"),
+                  nAGQ = 0,
+                  subset = NULL,
+                  weights = NULL,
+                  na.action = na.omit,
+                  offset = NULL,
+                  mustart = NULL,
+                  etastart = NULL)
+
+saveRDS(glmm.fit, paste0(outnam, ".rds"))
+summary(glmm.fit)
 ######
