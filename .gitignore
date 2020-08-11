@@ -43,3 +43,7 @@ rsconnect/
 
 # pyenv
 .python-version
+
+.spyproject/
+
+.pylint.d/
