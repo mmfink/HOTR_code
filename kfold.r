@@ -1,9 +1,10 @@
 ##############################################################################
 # k-fold crossvalidation of models, stratifying by Grid_ID
+# Requires functions in 'Performance_functions.r'
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 06/22/2020
+# Code Last Modified 11/23/2020
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -35,48 +36,26 @@ source("Performance_functions.r")
 
 pth <- "H:/HOTR_models"
 setwd(pth)
-set.seed(135)
-folds <- 10
+set.seed(5498)
 
-train_data <- fread(paste0(pth, "train_data_70pct.csv"), header=TRUE, sep=",")
-indata <- train_data[, Grid_ID := as.factor(Grid_ID)]
+## Ran this first with Sensitivity = 0.95, and numbers pretty low,
+## so running a second time with Sensitivity=Specificity just to see.
 
-# Assign a K-fold Split number to each Grid_ID.
-# NOTE while this technique selects whole grids, it selects them randomly
-# across the region and not stratified geographically.
-# Also note that the number of presence vs absence points in each fold
-# will not be strictly equal.
+train_data <- fread("training_kfold11192020.csv", header=TRUE, sep=",")
+cvdat <- train_data[, Grid_ID := as.factor(Grid_ID)]
 
-kf <- kfold(levels(indata$Grid_ID), k=folds)
-names(kf) <- levels(indata$Grid_ID)
-kfdt <- data.table(Grid_ID=names(kf), KFsplit=kf, stringsAsFactors = TRUE)
-
-# Add the Split column to the dataset
-cvdat <- train_data[kfdt, on=.(Grid_ID=Grid_ID)]
-
-# Let's run some summary stats on the folds to check for weirdness.
-inroll <- rollup(cvdat, j = c(list(cnt=.N), lapply(.SD, mean)),
-                 by = c("KFsplit", "response"), .SDcols = c(4:25))
-subresp <- inroll[!is.na(response)]
-setorder(subresp, KFsplit, response)
-fwrite(subresp, file = "KFSplit_byResponse_May14.csv")
-
-qplot(x=factor(KFsplit), data=cvdat, geom="bar", fill=factor(response),
-      xlab="K-fold Split", ylab="Count",
-      main="Presence/Absence per Split")
-
-tograph <- melt(subresp, id.vars = c("KFsplit", "response"),
-                measure.vars = c(4:25), variable.name = "metric")
-
-qplot(factor(response), value, data=tograph,
-      geom="boxplot", facets=.~factor(metric), color=factor(response),
-      xlab="K-fold mean value spread for each metric by response")
-####
-
-# **GLM**
-ncores <- 8
+## **GLM** ##
+ncores <- 10
 bestvars_G <- fread("vars_to_keep_Feb25.csv", header=TRUE, sep=",")
 varG <- bestvars_G$invar[bestvars_G$keep==1]
+f_glm <- biomod2::makeFormula(respName = "response",
+                              explVar = head(cvdat[, ..varG]),
+                              type = "simple",
+                              interaction.level = 0)
+q <- str_c(c(as.character(f_glm[3]), "(1|Grid_ID)", "I(GDD5^2)", "TWI:ppt_ws", "TWI:ppt_sf", "GDD5:clay",
+             "ppt_sf:clay", "ppt_ws:clay"), collapse = " + ")
+f_glm <- as.formula(paste("response ~", q, sep = " "))
+
 allcols <- c("KFsplit", "response", "Grid_ID", varG)
 dat <- cvdat[, ..allcols]
 
@@ -88,8 +67,6 @@ cv_metrics <- foreach(i = 1:10,
                       .packages = c("data.table", "lme4", "PresenceAbsence", "ROCR")) %dopar% {
                         datrain <- dat[KFsplit != i]
                         datest <- dat[KFsplit == i]
-                        # Note: error in lme4 v1.1-23 making optional args required
-                        # so glad I updated. :-/
                         fit <- glmer(f_glm, data = datrain,
                                      family = "binomial",
                                      control = glmerControl(optimizer = "bobyqa"),
@@ -103,7 +80,7 @@ cv_metrics <- foreach(i = 1:10,
                         evfit <- predict(fit, newdata=datest, type="response",
                                          allow.new.levels=TRUE)
                         evdt <- data.table(prob=evfit, resp=datest[, response])
-                        testEval(evdt, paste("fold", as.character(i)))
+                        testEval(evdt, paste("fold", as.character(i)), cutype="senspec")
                       }
 
 snow::stopCluster(cl)
@@ -115,17 +92,31 @@ cvout <- data.table(cv=unlist(cv_metrics[,1]), AUC=unlist(cv_metrics[,2]),
                     Threshold=unlist(cv_metrics[,9]))
 
 cvout
-cvout$model <- "GLM_May14"
+cvout$model <- "GLM_Nov19"
 
-# **RF**
-ntrees <- 4800
-mt <- 9
-#runs out of memory with anything higher than 2 cores
-ncores <- 2
+## **RF** ##
+# Tune first
 bestvars_T <- fread("vars_to_keep_Mar02.csv", header=TRUE, sep=",")
 varT <- bestvars_T$invar[bestvars_T$keep==1]
 allcols <- c("KFsplit", "response", varT)
 dat <- cvdat[, ..allcols][, response := as.factor(response)][, nlcd := as.factor(nlcd)]
+# 1) Tune mtry
+sub0 <- dat %>% dplyr::filter(response == 0) %>% sample_frac(0.3)
+sub1 <- dat %>% dplyr::filter(response == 1) %>% sample_frac(0.3)
+subtune <- as.data.table(bind_rows(sub1, sub0))
+
+x <- tuneRF(subtune[, ..varT], y=subtune[, response],
+            ntreeTry = 501,
+            stepFactor = 1.5,
+            improve=0.01)
+mt <- x[x[,2] == min(x[,2]),1]
+rm(subtune, sub0, sub1)
+# mt <- 9 same as last run
+
+ntrees <- 4800
+mt <- 9
+#runs out of memory with anything higher than 2 cores
+ncores <- 2
 
 cl <- snow::makeCluster(ncores, type = "SOCK")
 registerDoSNOW(cl)
@@ -144,7 +135,7 @@ cv_metrics <- foreach(i = 1:10,
                         evfit <- predict(fit, newdata=datest, type="prob",
                                          norm.votes=TRUE)
                         evdt <- data.table(prob=evfit[,2], resp=datest[, response])
-                        testEval(evdt, paste("fold", as.character(i)))
+                        testEval(evdt, paste("fold", as.character(i)), cutype="senspec")
                       }
 
 snow::stopCluster(cl)
@@ -152,10 +143,10 @@ snow::stopCluster(cl)
 cvout2 <- data.table(cv=unlist(cv_metrics[,1]), AUC=unlist(cv_metrics[,2]),
                      TSS=unlist(cv_metrics[,3]), err_rate=unlist(cv_metrics[,4]),
                      kappa=unlist(cv_metrics[,5]), PCC=unlist(cv_metrics[,6]),
-                     Sensitivty=unlist(cv_metrics[,7]), Specificity=unlist(cv_metrics[,8]),
+                     Sensitivity=unlist(cv_metrics[,7]), Specificity=unlist(cv_metrics[,8]),
                      Threshold=unlist(cv_metrics[,9]))
 
-cvout2$model <- "RF_May12"
+cvout2$model <- "RF_Nov23"
 addcv <- rbind(cvout, cvout2)
 
 # **BRT**
@@ -183,7 +174,7 @@ cv_metrics <- foreach(i = 1:10,
                                          n.trees=ntrees,
                                          type="response")
                         evdt <- data.table(prob=evfit, resp=datest[, response])
-                        testEval(evdt, paste("fold", as.character(i)))
+                        testEval(evdt, paste("fold", as.character(i)), cutype="senspec")
                       }
 
 snow::stopCluster(cl)
@@ -191,20 +182,20 @@ snow::stopCluster(cl)
 cvout3 <- data.table(cv=unlist(cv_metrics[,1]), AUC=unlist(cv_metrics[,2]),
                      TSS=unlist(cv_metrics[,3]), err_rate=unlist(cv_metrics[,4]),
                      kappa=unlist(cv_metrics[,5]), PCC=unlist(cv_metrics[,6]),
-                     Sensitivty=unlist(cv_metrics[,7]), Specificity=unlist(cv_metrics[,8]),
+                     Sensitivity=unlist(cv_metrics[,7]), Specificity=unlist(cv_metrics[,8]),
                      Threshold=unlist(cv_metrics[,9]))
 
-cvout3$model <- "BRT_May13"
+cvout3$model <- "BRT_Nov23"
 
 fullcv <- rbind(addcv, cvout3)
-fwrite(fullcv, file = "CrossValidation_metricsMay14.csv")
+fwrite(fullcv, file = "CrossValidation_metrics_SenSpec_Nov23.csv")
 tograph <- melt(fullcv, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
 ggplot(data=tograph, aes(x=factor(metric), y=value)) +
   geom_boxplot(aes(fill=factor(model))) +
   ylim(c(0,1)) +
   labs(x="Performance Metric", y="",
-       title="10-fold Cross-Validation of 70% Training, Sensitivity=0.95")
-######
+       title="10-fold Cross-Validation of 70% Training, Sensitivity=Specificity")
+####################################stopped here##############################
 
 ### Now evaluate models with Test data and compare ###
 RF_mod <- readRDS(paste0(pth,"RF_4800trees_May12.rds"))
