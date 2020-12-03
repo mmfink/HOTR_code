@@ -156,3 +156,91 @@ pred_tiles$options <- gopts
 
 out <- do.call(raster::merge, pred_tiles)
 #####
+
+### Now evaluate models with Test data and compare ###
+library(dismo)
+library(ROCR)
+library(ggplot2)
+source("Performance_functions.r")
+
+RF_mod <- readRDS(RF70)
+GLM_mod <- readRDS(GLM70)
+BRT_mod <- readRDS(BRT70)
+
+test_data <- fread("testing_data11192020.csv", header=TRUE, sep=",")
+bestvars_T <- fread("vars_to_keep_Mar02.csv", header=TRUE, sep=",")
+varT <- bestvars_T$invar[bestvars_T$keep==1]
+bestvars_G <- fread("vars_to_keep_Feb25.csv", header=TRUE, sep=",")
+varG <- bestvars_G$invar[bestvars_G$keep==1]
+
+## **RF** ##
+allcols <- c("response", varT)
+testdat <- test_data[, ..allcols][, response := as.factor(response)][, nlcd := as.factor(nlcd)]
+testRF <- predict(RF_mod, newdata=testdat, type="prob", norm.votes=TRUE)
+evRF <- data.table(prob=testRF[,2], resp=testdat[, response])
+outRF <- testEval(evRF, "RF_test15pct")
+
+## **BRT** ##
+testdat <- test_data[, ..allcols][, nlcd := as.factor(nlcd)]
+testBRT <- predict(BRT_mod, newdata=testdat, n.trees=25083, type="response")
+evBRT <- data.table(prob=testBRT, resp=testdat[, response])
+outBRT <- testEval(evBRT, "BRT_test15pct")
+
+## **GLMM** ##
+allcols <- c("response", "Grid_ID", varG)
+testdat <- test_data[, ..allcols][, Grid_ID := as.factor(Grid_ID)]
+testGLM <- predict(GLM_mod, newdata=testdat, type="response", allow.new.levels=TRUE)
+evGLM <- data.table(prob=testGLM, resp=testdat[, response])
+outGLM <- testEval(evGLM, "GLM_test15pct")
+
+testOut <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitivity, ~Specificity, ~Threshold,
+                           outGLM[[1]],outGLM[[2]],outGLM[[3]],outGLM[[4]],outGLM[[5]],outGLM[[6]],outGLM[[7]],outGLM[[8]],outGLM[[9]],
+                           outRF[[1]],outRF[[2]],outRF[[3]],outRF[[4]],outRF[[5]],outRF[[6]],outRF[[7]],outRF[[8]],outRF[[9]],
+                           outBRT[[1]],outBRT[[2]],outBRT[[3]],outBRT[[4]],outBRT[[5]],outBRT[[6]],outBRT[[7]],outBRT[[8]],outBRT[[9]])
+
+fwrite(testOut, file = "Testing15pct_Dec012020.csv")
+fullcv <- fread("CrossValidation_metricsNov23.csv", header=TRUE, sep=",")
+tograph <- melt(fullcv, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
+toadd <- melt(testOut, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
+
+ggplot(data=tograph, aes(x=factor(metric), y=value)) +
+  geom_boxplot(aes(fill=factor(model))) +
+  ylim(c(0,1)) +
+  labs(x="Performance Metric", y="",
+       title="10-fold Cross-Validation Plus Testing Data, Sensitivity=0.95") +
+  geom_point(data=toadd, aes(x=factor(metric),y=value,
+                             color=factor(Name)),
+             size=4, pch=18) +
+  guides(fill=guide_legend(title = "10fold Training"),
+         color=guide_legend(title = "Testing data"))
+
+## again, with Sensitiviy = Specificity
+## **RF** ##
+outRF <- testEval(evRF, "RF_test15pct", cutype="senspec")
+
+## **BRT** ##
+outBRT <- testEval(evBRT, "BRT_test15pct", cutype="senspec")
+
+## **GLMM** ##
+outGLM <- testEval(evGLM, "GLM_test15pct", cutype="senspec")
+
+testOut <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitivity, ~Specificity, ~Threshold,
+                           outGLM[[1]],outGLM[[2]],outGLM[[3]],outGLM[[4]],outGLM[[5]],outGLM[[6]],outGLM[[7]],outGLM[[8]],outGLM[[9]],
+                           outRF[[1]],outRF[[2]],outRF[[3]],outRF[[4]],outRF[[5]],outRF[[6]],outRF[[7]],outRF[[8]],outRF[[9]],
+                           outBRT[[1]],outBRT[[2]],outBRT[[3]],outBRT[[4]],outBRT[[5]],outBRT[[6]],outBRT[[7]],outBRT[[8]],outBRT[[9]])
+
+fwrite(testOut, file = "Testing15pct_senspec_Dec012020.csv")
+fullcv <- fread("CrossValidation_metrics_SenSpec_Nov23.csv", header=TRUE, sep=",")
+tograph <- melt(fullcv, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
+toadd <- melt(testOut, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
+
+ggplot(data=tograph, aes(x=factor(metric), y=value)) +
+  geom_boxplot(aes(fill=factor(model))) +
+  ylim(c(0,1)) +
+  labs(x="Performance Metric", y="",
+       title="10-fold Cross-Validation Plus Testing Data, Sensitivity=Specificity") +
+  geom_point(data=toadd, aes(x=factor(metric),y=value,
+                             color=factor(Name)),
+             size=4, pch=18) +
+  guides(fill=guide_legend(title = "10fold Training"),
+         color=guide_legend(title = "Testing data"))
