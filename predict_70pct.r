@@ -1,5 +1,6 @@
 ##############################################################################
-# Predict various models to full study area and write to raster
+# Predict models to full study area and write to raster
+# Models created in Nov2020_models.r
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
@@ -20,7 +21,6 @@
 # along with this program.  If not, see https://www.gnu.org/licenses/
 #############################################################################
 
-##### Raster Creation #####
 library(data.table)
 library(stringr)
 library(raster)
@@ -33,7 +33,7 @@ library(doSNOW)
 pth <- "H:/HOTR_models"
 setwd(pth)
 
-########
+##Prediction Function##
 raspred <- function(tile_i, tiles_pth=pth, model, lyrnames,
                     oname, modtype){
   fname <- file.path(tiles_pth,
@@ -66,7 +66,7 @@ raspred <- function(tile_i, tiles_pth=pth, model, lyrnames,
   }
   return(outras)
 }
-########
+####
 
 BRT70 <- "BRT_gbmholdout_50ktNov24_2020.rds"
 GLM70 <- "GLMER_Nov24_2020.rds"
@@ -129,7 +129,7 @@ pred_tiles$format <- "GTiff"
 pred_tiles$options <- gopts
 
 out <- do.call(raster::merge, pred_tiles)
-########
+#####
 
 ### GLM
 mod <- readRDS(file.path(pth,GLM70))
@@ -156,23 +156,3 @@ pred_tiles$options <- gopts
 
 out <- do.call(raster::merge, pred_tiles)
 #####
-
-## Manual merging if necessary ##
-# Identify corrupt tiles
-intifs <- list.files(pattern = "RF_70pct_\\d+\\.tif")
-for(t in intifs){plot(raster(t))}
-
-# Fix
-i_tile <- 197
-raspred(tiles_index$tile[i_tile], tiles_pth = tile_pth, model = mod,
-        lyrnames = subdf$label, oname = tile_prefix, modtype = "RF")
-
-gopts <- c("COMPRESS=LZW", "TFW=YES", "NUM_THREADS=14", "BIGTIFF=YES")
-outname <- str_replace(RF70, "rds", "tif")
-intifs <- list.files(pattern = "RF_70pct_\\d+\\.tif")
-raslist <- lapply(intifs, raster)
-raslist$filename <- outname
-raslist$format <- "GTiff"
-raslist$options <- gopts
-out <- do.call(raster::merge, raslist)
-
