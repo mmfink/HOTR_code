@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 This is a collection of R and Python scripts for data synthesis and analysis that are being written for and used in the [Homes on the Range project](https://www.humanesociety.org/news/homes-range-launches-conserve-prairie-dog-ecosystem).  
 
-This is not a stand-alone package or application, but a curated collection of scripts that have been successfully used. See the heading comments of each script file for its intended purpose.  Scripts are added or updated as tasks are completed or revised.
+This is not a stand-alone package or application, but a curated collection of scripts that have been successfully used. See the heading comments of each script file for its intended purpose.  Scripts are added or updated as tasks are completed or revised (or as time allows).
 
 ## Funding
 

@@ -10,7 +10,7 @@ project](https://www.humanesociety.org/news/homes-range-launches-conserve-prairi
 This is not a stand-alone package or application, but a curated
 collection of scripts that have been successfully used. See the heading
 comments of each script file for its intended purpose. Scripts are added
-or updated as tasks are completed or revised.
+or updated as tasks are completed or revised (or as time allows).
 
 ## Funding
 

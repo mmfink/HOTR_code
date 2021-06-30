@@ -1,0 +1,7 @@
+raster,label,type
+H:/HOTR_models/PARC/MIROC5_rcp85_MACA_2079_2099_annual_GDD_base5.tif,HotDry_GDD5,GDD5
+H:/HOTR_models/PARC/IPSL_CM5A_LR_rcp45_MACA_2079_2099_annual_GDD_base5.tif,WarmWet_GDD5,GDD5
+H:/HOTR_models/PARC/MIROC5_rcp85_MACA_2079_2099_summer_fall_pr.tif,HotDry_ppt_sf,ppt_sf
+H:/HOTR_models/PARC/IPSL_CM5A_LR_rcp45_MACA_2079_2099_summer_fall_pr.tif,WarmWet_ppt_sf,ppt_sf
+H:/HOTR_models/PARC/MIROC5_rcp85_MACA_2079_2099_winter_spring_pr.tif,HotDry_ppt_ws,ppt_ws
+H:/HOTR_models/PARC/IPSL_CM5A_LR_rcp45_MACA_2079_2099_winter_spring_pr.tif,WarmWet_ppt_ws,ppt_ws

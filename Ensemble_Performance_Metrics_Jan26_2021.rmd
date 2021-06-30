@@ -1,0 +1,206 @@
+---
+title: "Ensemble Thresholds"
+author: "Michelle M. Fink"
+date: "1/26/2021"
+output:
+  html_document:
+    code_folding: hide
+    df_print: kable
+    fig_align: center
+    fig_height: 6
+    highlight: tango
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(kableExtra)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.lazy = FALSE)
+```
+
+Expand code block to see libraries and functions used.
+```{r initial, message=FALSE, warning=FALSE, cache=FALSE}
+.libPaths("E:/MMF/R/win-library/3.6") #Modeling server
+Sys.setenv(R_USER = "E:/MMF")
+library(data.table)
+library(raster)
+library(ggplot2)
+library(ROCR)
+library(randomForest)
+library(dismo)
+library(lme4)
+library(PresenceAbsence) # for Kappa and PCC
+library(stringr)
+
+pth <- "H:/HOTR_models/"
+setwd(pth)
+source("Performance_functions.r")
+
+#https://github.com/brendano/dlanalysis/blob/master/util.R
+linelight <- function(x,y, lty='dashed', col='lightgray', ...) {
+  # highlight a point with lines running to the axes.
+  left = par('usr')[1]
+  bot = par('usr')[3]
+  segments(left,y, x,y, lty=lty, col=col, ...)
+  segments(x,bot,  x,y, lty=lty, col=col, ...)
+}
+```
+# Ensemble Model Evaluation and Review {.tabset .tabset-fade}
+```{r constants}
+pth <- "H:/HOTR_models/"
+source(paste0(pth,"Performance_functions.r"))
+
+#           Low        Medium      High
+enspal <- c("#ff8318", "#377ed6", "#006804")
+```
+
+## Symbolizing the model {.tabset .tabset-pills}
+These images are all of the Ensemble model, just symbolized differently.  
+
+### Min-Max stretch
+![Min-Max](ENS_MinMax.png)
+
+### Histogram Equalize stretch
+![Histogram Equalize](ENS_HistEq.png)
+
+### Sigmoid stretch
+![Sigmoid](ENS_Sigmoid.png)
+
+### Threshold-based categories
+![Categorical (Earth Tones)](ENS_Cat2.png)
+
+### Alternate
+And if you don't like subtle colors in categorical view:  
+![Categorical (Yucko)](ENS_Cat.png)
+
+## Performance Metrics
+I combined the two withheld datasets ('Testing' and 'Tweaking') because Tweaking was never used this time around. So the model was *Trained* on 70% of the data, and was evaluated (below and next tab) against the *remaining 30%*.  
+```{r metrics}
+#Combine the withheld datasets so we have a 30% test set of points
+dat1 <- fread("testing_data01072021.csv", header=TRUE, sep=",")
+dat2 <- fread("tweaking_data01072021.csv", header=TRUE, sep=",")
+test_data <- rbind(dat1, dat2)
+
+#Load the Ensemble model and get the testing values
+ENras <- raster("ensemble_wave_Jan192021.tif")
+xy30 <- setnames(test_data[, 37:38], c("lon","lat"),  c("X","Y"))
+EN30vals <- extract(ENras, xy30)
+evEN <- data.table(prob=EN30vals, resp=test_data[, response])
+
+#Metrics with Sensitivity = Specificity
+outEN1 <- testEval(evEN, "EN_SenSpec", cutype = "senspec")
+
+#Metrics with Sensitivity = 0.95
+outEN2 <- testEval(evEN, "EN_Sens95", cutype = "sens95")
+
+#Metrics with Specificity = 0.95
+outEN3 <- testEval(evEN, "EN_Spec95", cutype = "spec95")
+
+# Combine
+testEn <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitivity, ~Specificity, ~Threshold,
+                           outEN1[[1]],outEN1[[2]],outEN1[[3]],outEN1[[4]],outEN1[[5]],outEN1[[6]],outEN1[[7]],outEN1[[8]],outEN1[[9]],
+                          outEN2[[1]],outEN2[[2]],outEN2[[3]],outEN2[[4]],outEN2[[5]],outEN2[[6]],outEN2[[7]],outEN2[[8]],outEN2[[9]],
+                          outEN3[[1]],outEN3[[2]],outEN3[[3]],outEN3[[4]],outEN3[[5]],outEN3[[6]],outEN3[[7]],outEN3[[8]],outEN3[[9]])
+```
+```{r plotmetrics, cache=FALSE, fig.width=7, message=FALSE, warning=FALSE}
+#Graph
+tograph <- melt(testEn, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
+ggplot(data=tograph, aes(x=factor(metric), y=value)) +
+  geom_jitter(aes(fill=factor(Name)), size=3, pch=23, width=0.2) +
+  labs(x="Performance Metric", y="",
+       title="Ensemble Model Metrics") +
+  scale_fill_manual(values=enspal) +
+  guides(fill=guide_legend(title = "Threshold Type"))
+```
+
+```{r tablemetrics}
+kable(testEn, format = "html", row.names = FALSE, digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(2:9, color="black") %>% column_spec(1, bold=TRUE)
+```
+
+
+## ROCR Plots
+```{r ROC}
+pred30En = prediction(predictions=evEN[,1], labels=evEN[,2])
+perf.roc <- performance(pred30En, "tpr", "fpr")
+perf.err <- performance(pred30En, "err")
+perf.flip <- performance(pred30En, "tnr", "fnr")
+perf.PA <- performance(pred30En, "prec", "acc")
+```
+Gray solid lines indicate random performance.  
+Dashed lines shows the the values the axes measure for the **Thresholds** at  
+
++ Sensitivity = 0.95 (`r round(as.numeric(testEn[2,9]),3)`)
++ Sensitivity = Specificity (`r round(as.numeric(testEn[1,9]),3)`)
++ Specificity = 0.95 (`r round(as.numeric(testEn[3,9]),3)`)  
+  
+```{r perfplots, cache=FALSE, out.width="50%", fig.width=4.5, fig.height=5, fig.align="default", fig.show="hold"}
+plot(perf.roc, col="red", lwd=2,
+     main="Ensemble ROC",
+     xlim=c(0,1))
+linelight(x=1-as.numeric(testEn[1,8]), y=as.numeric(testEn[1,7]),
+          col=enspal[2])
+linelight(x=1-as.numeric(testEn[2,8]), y=as.numeric(testEn[2,7]),
+          col=enspal[1])
+linelight(x=1-as.numeric(testEn[3,8]), y=as.numeric(testEn[3,7]),
+          col=enspal[3])
+abline(a = 0, b = 1, col = "gray")
+legend("right", c("Sens95", "Sens=Spec", "Spec95"), lty = "dashed",
+       col = c(enspal[1],enspal[2],enspal[3]), bty = "n")
+
+plot(perf.err, col="red", lwd=2,
+     main="Error Rate vs. Threshold Cutoff",
+     xlim=c(0,1), ylim=c(0,0.7))
+linelight(x=as.numeric(testEn[1,9]), y=as.numeric(testEn[1,4]),
+          col=enspal[2])
+linelight(x=as.numeric(testEn[2,9]), y=as.numeric(testEn[2,4]),
+          col=enspal[1])
+linelight(x=as.numeric(testEn[3,9]), y=as.numeric(testEn[3,4]),
+          col=enspal[3])
+lines(x=c(0,1), y=c(0.5,0.5), col="gray")
+legend("top", c("Sens95", "Sens=Spec", "Spec95"), lty = "dashed",
+       col = c(enspal[1],enspal[2],enspal[3]), bty = "n")
+
+i1 <- which(perf.flip@alpha.values[[1]] == as.numeric(testEn[1,9]))
+i2 <- which(perf.flip@alpha.values[[1]] == as.numeric(testEn[2,9]))
+i3 <- which(perf.flip@alpha.values[[1]] == as.numeric(testEn[3,9]))
+
+plot(perf.flip, col="red", lwd=2,
+     main="Flip-side of the ROC")
+abline(a = 0, b = 1, col = "gray")
+linelight(x=perf.flip@x.values[[1]][i1],
+          y=perf.flip@y.values[[1]][i1],
+          col=enspal[2])
+linelight(x=perf.flip@x.values[[1]][i2],
+          y=perf.flip@y.values[[1]][i2],
+          col=enspal[1])
+linelight(x=perf.flip@x.values[[1]][i3],
+          y=perf.flip@y.values[[1]][i3],
+          col=enspal[3])
+legend("right", c("Sens95", "Sens=Spec", "Spec95"), lty = "dashed",
+       col = c(enspal[1],enspal[2],enspal[3]), bty = "n")
+
+j1 <- which(perf.PA@alpha.values[[1]] == as.numeric(testEn[1,9]))
+j2 <- which(perf.PA@alpha.values[[1]] == as.numeric(testEn[2,9]))
+j3 <- which(perf.PA@alpha.values[[1]] == as.numeric(testEn[3,9]))
+
+plot(perf.PA, col="red", lwd=2,
+     main="Precision vs. Accuracy",
+     xlim=c(0.5,1), ylim=c(0.5,1))
+lines(x=c(0.5,0.5), y=c(0.5,1), col="gray")
+linelight(x=perf.PA@x.values[[1]][j1],
+          y=perf.PA@y.values[[1]][j1],
+          col=enspal[2])
+linelight(x=perf.PA@x.values[[1]][j2],
+          y=perf.PA@y.values[[1]][j2],
+          col=enspal[1])
+linelight(x=perf.PA@x.values[[1]][j3],
+          y=perf.PA@y.values[[1]][j3],
+          col=enspal[3])
+legend("left", c("Sens95", "Sens=Spec", "Spec95"), lty = "dashed",
+       col = c(enspal[1],enspal[2],enspal[3]), bty = "n")
+```
+
+*Accuracy*: $P(Yhat = Y)$. Estimated as: $(TP+TN)/(P+N)$  
+*Precision*: Positive predictive value. $P(Y = + | Yhat = +)$. Estimated as: $TP/(TP+FP)$  

@@ -1,10 +1,10 @@
 ##############################################################################
 # Predict models to full study area and write to raster
-# Models created in Nov2020_models.r
+# Models created in Jan2021_models.r, uses Performance_functions.r
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 11/30/2020
+# Code Last Modified 01/19/2021
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -32,6 +32,7 @@ library(doSNOW)
 
 pth <- "H:/HOTR_models"
 setwd(pth)
+rasterOptions(tmpdir = "E:/MMF/temp")
 
 ##Prediction Function##
 raspred <- function(tile_i, tiles_pth=pth, model, lyrnames,
@@ -55,7 +56,7 @@ raspred <- function(tile_i, tiles_pth=pth, model, lyrnames,
       #Boosted Regression Tree:
       outras <- raster::predict(ras, model=model, index=1, filename=oname, na.rm=FALSE,
                                 format="GTiff", overwrite=TRUE, options=opt,
-                                n.trees=20490, type="response", single.tree=FALSE)
+                                n.trees=26270, type="response", single.tree=FALSE)
     }
     if(modtype == "GLM"){
       #Generalized Linear Mixed Model
@@ -68,11 +69,11 @@ raspred <- function(tile_i, tiles_pth=pth, model, lyrnames,
 }
 ####
 
-BRT70 <- "BRT_gbmholdout_50ktNov24_2020.rds"
-GLM70 <- "GLMER_Nov24_2020.rds"
-RF70 <- "RF_4800trees_Nov24_2020.rds"
+BRT70 <- "BRT_gbmholdout_50ktJan11_2021.rds"
+GLM70 <- "GLMER_Jan07_2021.rds"
+RF70 <- "RF_4200trees_Jan12_2021.rds"
 
-ncores <- 16
+ncores <- 14
 gopts <- c("COMPRESS=LZW", "TFW=YES", "NUM_THREADS=4", "BIGTIFF=YES")
 
 env_inputs <- fread("env_inputs_04022020.csv", header = TRUE, sep = ",")
@@ -157,6 +158,26 @@ pred_tiles$options <- gopts
 out <- do.call(raster::merge, pred_tiles)
 #####
 
+## Manual merging if necessary - do not run this section otherwise ##
+# Identify corrupt tiles
+intifs <- list.files(pattern = "RF_70pct_\\d+\\.tif")
+for(t in intifs){plot(raster(t))}
+
+# Fix
+i_tile <- 198
+raspred(tiles_index$tile[i_tile], tiles_pth = tile_pth, model = mod,
+        lyrnames = subdf$label, oname = tile_prefix, modtype = "RF")
+
+gopts <- c("COMPRESS=LZW", "TFW=YES", "NUM_THREADS=14", "BIGTIFF=YES")
+outname <- str_replace(RF70, "rds", "tif")
+intifs <- list.files(pattern = "RF_70pct_\\d+\\.tif")
+raslist <- lapply(intifs, raster)
+raslist$filename <- outname
+raslist$format <- "GTiff"
+raslist$options <- gopts
+out <- do.call(raster::merge, raslist)
+#####
+
 ### Now evaluate models with Test data and compare ###
 library(dismo)
 library(ROCR)
@@ -167,7 +188,7 @@ RF_mod <- readRDS(RF70)
 GLM_mod <- readRDS(GLM70)
 BRT_mod <- readRDS(BRT70)
 
-test_data <- fread("testing_data11192020.csv", header=TRUE, sep=",")
+test_data <- fread("testing_data01072021.csv", header=TRUE, sep=",")
 bestvars_T <- fread("vars_to_keep_Mar02.csv", header=TRUE, sep=",")
 varT <- bestvars_T$invar[bestvars_T$keep==1]
 bestvars_G <- fread("vars_to_keep_Feb25.csv", header=TRUE, sep=",")
@@ -182,7 +203,7 @@ outRF <- testEval(evRF, "RF_test15pct")
 
 ## **BRT** ##
 testdat <- test_data[, ..allcols][, nlcd := as.factor(nlcd)]
-testBRT <- predict(BRT_mod, newdata=testdat, n.trees=25083, type="response")
+testBRT <- predict(BRT_mod, newdata=testdat, n.trees=26270, type="response")
 evBRT <- data.table(prob=testBRT, resp=testdat[, response])
 outBRT <- testEval(evBRT, "BRT_test15pct")
 
@@ -194,12 +215,12 @@ evGLM <- data.table(prob=testGLM, resp=testdat[, response])
 outGLM <- testEval(evGLM, "GLM_test15pct")
 
 testOut <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitivity, ~Specificity, ~Threshold,
-                           outGLM[[1]],outGLM[[2]],outGLM[[3]],outGLM[[4]],outGLM[[5]],outGLM[[6]],outGLM[[7]],outGLM[[8]],outGLM[[9]],
-                           outRF[[1]],outRF[[2]],outRF[[3]],outRF[[4]],outRF[[5]],outRF[[6]],outRF[[7]],outRF[[8]],outRF[[9]],
-                           outBRT[[1]],outBRT[[2]],outBRT[[3]],outBRT[[4]],outBRT[[5]],outBRT[[6]],outBRT[[7]],outBRT[[8]],outBRT[[9]])
+outGLM[[1]],outGLM[[2]],outGLM[[3]],outGLM[[4]],outGLM[[5]],outGLM[[6]],outGLM[[7]],outGLM[[8]],outGLM[[9]],
+outRF[[1]],outRF[[2]],outRF[[3]],outRF[[4]],outRF[[5]],outRF[[6]],outRF[[7]],outRF[[8]],outRF[[9]],
+outBRT[[1]],outBRT[[2]],outBRT[[3]],outBRT[[4]],outBRT[[5]],outBRT[[6]],outBRT[[7]],outBRT[[8]],outBRT[[9]])
+fwrite(testOut, file = "Testing15pct_Jan192021.csv")
 
-fwrite(testOut, file = "Testing15pct_Dec012020.csv")
-fullcv <- fread("CrossValidation_metricsNov23.csv", header=TRUE, sep=",")
+fullcv <- fread("CrossValidation_metrics_Sens95_01122021.csv", header=TRUE, sep=",")
 tograph <- melt(fullcv, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
 toadd <- melt(testOut, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
 
@@ -229,8 +250,8 @@ testOut <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitiv
                            outRF[[1]],outRF[[2]],outRF[[3]],outRF[[4]],outRF[[5]],outRF[[6]],outRF[[7]],outRF[[8]],outRF[[9]],
                            outBRT[[1]],outBRT[[2]],outBRT[[3]],outBRT[[4]],outBRT[[5]],outBRT[[6]],outBRT[[7]],outBRT[[8]],outBRT[[9]])
 
-fwrite(testOut, file = "Testing15pct_senspec_Dec012020.csv")
-fullcv <- fread("CrossValidation_metrics_SenSpec_Nov23.csv", header=TRUE, sep=",")
+fwrite(testOut, file = "Testing15pct_senspec_Jan192021.csv")
+fullcv <- fread("CrossValidation_metrics_SenSpec_Jan19.csv", header=TRUE, sep=",")
 tograph <- melt(fullcv, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
 toadd <- melt(testOut, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
 

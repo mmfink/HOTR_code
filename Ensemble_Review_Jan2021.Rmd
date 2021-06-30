@@ -1,0 +1,423 @@
+---
+title: "Ensemble Review"
+author: "Michelle M. Fink"
+date: "01/20/2021"
+output:
+  html_document:
+    code_folding: hide
+    df_print: kable
+    fig_align: center
+    fig_height: 6
+    highlight: tango
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(kableExtra)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.lazy = FALSE)
+```
+
+Expand code block to see libraries and functions used.
+```{r initial, message=FALSE, warning=FALSE, cache=FALSE}
+library(dplyr)
+library(data.table)
+library(stringr)
+library(randomForest)
+library(lme4)
+library(gbm)
+library(dismo)
+library(ROCR)
+library(PresenceAbsence) # for Kappa and PCC
+library(ggplot2)
+
+opt.cut <- function(perf, pred, type="senspec"){
+  # Returns [Sensitivity, Specificity, Threshold]
+  # adapted from:
+  #https://www.r-bloggers.com/a-small-introduction-to-the-rocr-package/
+  #type="senspec" calculates sensitivity = specificity threshold
+  #type="sens95" caclulates sensitivity = 0.95 threshold
+
+  mapply(FUN=function(x, y, p){
+    if(type == "senspec"){
+      d = (x - 0)^2 + (y-1)^2
+      ind = which(d == min(d))
+      c(sensitivity = y[[ind]], specificity = 1-x[[ind]],
+        cutoff = p[[ind]])
+    } else if(type == "sens95"){
+      d = which(y >= 0.95)
+      ind = which(y == min(y[d]))
+      if(length(ind > 1)){ # if ties, take first
+        idx <- ind[1]
+      } else {
+        idx <- ind
+      }
+      c(sensitivity = y[[idx]], specificity = 1-x[[idx]],
+        cutoff = p[[idx]])
+    }
+  }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+
+testEval <- function(evobj, run_name, cutype="sens95"){
+  #evobj == data.table(prob, resp)
+  #cutype -> see 'type' in functon opt.cut above
+  pred.mod <- prediction(evobj$prob, evobj$resp)
+  perf.roc <- performance(pred.mod, "tpr", "fpr")
+  perf.err <- performance(pred.mod, "err")
+  AUC <- performance(pred.mod, measure = "auc")@y.values[[1]]
+  sst <- opt.cut(perf.roc, pred.mod, type = cutype)
+  TSS <- sst[1] + sst[2] - 1
+  err_rate <- perf.err@y.values[[1]][which(perf.err@x.values[[1]] == sst[3])]
+
+  #Presence.Absence insists on its own data structure
+  padat <- data.frame(ID=seq(1:length(pred.mod@predictions[[1]])),
+                      OBS=as.numeric(levels(pred.mod@labels[[1]]))[pred.mod@labels[[1]]],
+                      PRED=pred.mod@predictions[[1]])
+
+  pacmx <- cmx(padat, threshold = sst[3])
+  kappa <- Kappa(pacmx, st.dev = FALSE)
+  PCC <- pcc(pacmx, st.dev = FALSE)
+
+  return(list(run_name, AUC, TSS, err_rate, kappa, PCC, sst[1], sst[2], sst[3]))
+}
+
+get.pred <- function(modobj, modtype="GLM"){
+  if(modtype=="RF"){
+    p_rf.mod <- predict(modobj, type = "prob")
+    pred.mod <- prediction(p_rf.mod[,2], modobj$y)
+  } else if(modtype=="BRT") {
+    p_brt.mod <- predict(modobj, type = "response")
+    pred.mod <- prediction(p_brt.mod, modobj$data$y)
+  } else {
+    pred.mod <- prediction(modobj@resp$mu, modobj@resp$y)
+  }
+  return(pred.mod)
+}
+
+ConfMatrix <- function(predRDS, thresh, column=1){
+  #Presence.Absence insists on its own data structure
+  padat <- data.frame(ID=seq(1:length(predRDS@predictions[[1]])),
+                      OBS=as.numeric(levels(predRDS@labels[[column]]))[predRDS@labels[[column]]],
+                      PRED=predRDS@predictions[[column]])
+
+  pacmx <- cmx(padat, threshold = thresh)
+
+  return(pacmx)
+}
+
+#https://github.com/brendano/dlanalysis/blob/master/util.R
+linelight <- function(x,y, lty='dashed', col='lightgray', ...) {
+  # highlight a point with lines running to the axes.
+  left = par('usr')[1]
+  bot = par('usr')[3]
+  segments(left,y, x,y, lty=lty, col=col, ...)
+  segments(x,bot,  x,y, lty=lty, col=col, ...)
+}
+```
+# Model Evaluation and Review {.tabset .tabset-fade}
+```{r path}
+pth <- "H:/HOTR_models/"
+```
+
+## Model Rasters {.tabset .tabset-pills}
+These maps are displayed using a linear min to max stretch, dark green (high) to light tan (low) color ramp.  
+
+### GLMM
+![GLMM](GLM_Jan2021.png)    
+
+### RF
+![RF](RF_Jan2021.png)  
+
+### BRT
+![BRT](BRT_Jan2021.png)        
+
+### Ensemble
+![Ensemble](Ens_Jan2021.png)
+
+## Evaluation metrics
+```{r metrics}
+testOut <- fread(paste0(pth, "Testing15pct_allModels_Jan192021.csv"))
+cvTable <- fread(paste0(pth, "CrossValidation_metrics_Sens95_01122021.csv"))
+tograph <- melt(cvTable, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
+toadd <- melt(testOut, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
+```
+
+```{r plotmetrics, cache=FALSE, fig.width=7}
+m4Palette <- c("#cf6329", "#a921ff", "#00ba38", "#619cff")
+
+ggplot(data=tograph, aes(x=factor(metric), y=value)) +
+  geom_boxplot(aes(fill=factor(model))) +
+  ylim(c(0,1)) +
+  labs(x="Performance Metric", y="",
+       title="10-fold Cross-Validation Plus Testing Data, Sensitivity=0.95") +
+  geom_jitter(data=toadd, aes(x=factor(metric),y=value,
+                             color=factor(Name)),
+             size=3, pch=10) +
+  scale_colour_manual(values=m4Palette) +
+  guides(fill=guide_legend(title = "10fold Training"),
+         color=guide_legend(title = "Testing data"))
+```
+  
+  
+### Evaluation metrics for the withheld data:
+
+**Testing Dataset**  
+```{r tablemetrics1}
+kable(testOut, format = "html", row.names = FALSE, digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(2:9, color="black") %>% column_spec(1, bold=TRUE)
+```
+...and hey, there's this other 15% that didn't really get used for tweaking this go-around.  
+
+**Tweaking Dataset**  
+```{r tablemetrics2}
+tweakdat <- fread(paste0(pth, "tweaking_data01072021.csv"))
+modTwk <- fread(paste0(pth, "Tweak15pct_01122021.csv"))
+
+# Evaluate ensemble with Tweaking data
+ENras <- raster(paste0(pth, "ensemble_wave_Jan192021.tif"))
+xy15 <- setnames(tweakdat[, 37:38], c("lon","lat"),
+                 c("X","Y"))
+EN15vals <- extract(ENras, xy15)
+evEN <- data.table(prob=EN15vals, resp=tweakdat[, response])
+outEN <- testEval(evEN, "EN_twk15pct")
+twkEn <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitivity, ~Specificity, ~Threshold,
+                    outEN[[1]],outEN[[2]],outEN[[3]],outEN[[4]],outEN[[5]],outEN[[6]],outEN[[7]],outEN[[8]],outEN[[9]])
+twkOut <- rbind(modTwk, twkEn)
+
+kable(twkOut, format = "html", row.names = FALSE, digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(2:9, color="black") %>% column_spec(1, bold=TRUE)
+```
+
+
+## ROC and Other Plots
+```{r perfobs}
+predAll <- readRDS(paste0(pth, "predictions15pct_allMod_Jan192021.rds"))
+
+perf.roc <- performance(predAll, "tpr", "fpr")
+perf.err <- performance(predAll, "err")
+perf.flip <- performance(predAll, "tnr", "fnr")
+perf.PA <- performance(predAll, "prec", "acc")
+```
+
+### These plots are for performance against the 15% *Test* data
+Gray solid lines indicate random performance.  
+Dashed lines shows the the values the axes measure for the **Ensemble** at the Sensitivity = 0.95 threshold (`r as.numeric(testOut[4,9])`).   
+
+```{r perfplots, cache=FALSE, out.width="50%", fig.width=4.5, fig.height=5, fig.align="default", fig.show="hold"}
+trng <- c(as.numeric(testOut[4,9])-0.000001,
+          as.numeric(testOut[4,9])+0.000001)
+i <- which((perf.roc@alpha.values[[4]] > trng[1]) &
+             (perf.roc@alpha.values[[4]] < trng[2]))
+
+# 1) Red, 2) Green, 3) Cyan, 4) Purple
+plot(perf.roc, col=as.list(rainbow(4)),
+     main="ROC for the 4 models",
+     xlim=c(0,1))
+linelight(x=perf.roc@x.values[[4]][i], y=perf.roc@y.values[[4]][i],
+          col="plum3")
+abline(a = 0, b = 1, col = "gray")
+legend("right", c("GLM", "RF", "BRT", "EN"), lty = "solid",
+       col = rainbow(4), bty = "n")
+
+plot(perf.err, col=as.list(rainbow(4)),
+     main="Error Rate vs. Threshold Cutoff",
+     xlim=c(0,1), ylim=c(0,1))
+linelight(x=as.numeric(testOut[4,9]), 
+          y=as.numeric(testOut[4,4]), col="plum3")
+lines(x=c(0,1), y=c(0.5,0.5), col="gray")
+legend("top", c("GLM", "RF", "BRT", "EN"), lty = "solid",
+       col = rainbow(4), bty = "n")
+
+i <- which((perf.flip@alpha.values[[4]] > trng[1]) &
+             (perf.flip@alpha.values[[4]] < trng[2]))
+
+plot(perf.flip, col=as.list(rainbow(4)),
+     main="Flip-side of the ROC")
+abline(a = 0, b = 1, col = "gray")
+linelight(x=perf.flip@x.values[[4]][i],
+          y=perf.flip@y.values[[4]][i],
+          col="plum3")
+legend("right", c("GLM", "RF", "BRT", "EN"), lty = "solid",
+       col = rainbow(4), bty = "n")
+
+i <- which((perf.PA@alpha.values[[4]] > trng[1]) &
+             (perf.PA@alpha.values[[4]] < trng[2]))
+
+plot(perf.PA, col=as.list(rainbow(4)),
+     main="Precision vs. Accuracy",
+     xlim=c(0.5,1), ylim=c(0.5,1))
+linelight(x=perf.PA@x.values[[4]][i],
+          y=perf.PA@y.values[[4]][i],
+          col="plum3")
+legend("left", c("GLM", "RF", "BRT", "EN"), lty = "solid",
+       col = rainbow(4), bty = "n")
+```
+
+*Accuracy*: $P(Yhat = Y)$. Estimated as: $(TP+TN)/(P+N)$  
+*Precision*: Positive predictive value. $P(Y = + | Yhat = +)$. Estimated as: $TP/(TP+FP)$  
+
+## Confusion Matrix
+These are calculated at Sensitivity = 0.95 and from the *Testing* data (of which there are 16,168 records).  
+
+...and we want them to look like this ![Example](Example_confmat.png)  
+
+```{r confusion, cache=FALSE, warning=FALSE, out.width="50%", fig.width=4.5, fig.height=4.5, fig.align="default", fig.show="hold"}
+cmxG <- ConfMatrix(predAll, 
+                   thresh = as.numeric(testOut[1,9]), 
+                   column = 1)
+
+#Adapted from https://stackoverflow.com/questions/37897252/plot-confusion-matrix-in-r-using-ggplot
+ggplot(data=as.data.frame(cmxG),
+       aes(x=observed, y=predicted)) +
+  geom_tile(aes(fill=Freq), color="white") +
+  geom_text(aes(label=Freq), vjust=1) +
+  scale_fill_gradientn(breaks=c(400,2000,4000,8000),
+                      colors = hcl.colors(4, "Heat")) +
+  labs(title = "GLMM Confusion Matrix") +
+  theme_bw() + theme(legend.position = "none")
+
+cmxR <- ConfMatrix(predAll, 
+                   thresh = as.numeric(testOut[2,9]), 
+                   column = 2)
+
+ggplot(data=as.data.frame(cmxR),
+       aes(x=observed, y=predicted)) +
+  geom_tile(aes(fill=Freq), color="white") +
+  geom_text(aes(label=Freq), vjust=1) +
+  scale_fill_gradientn(breaks=c(400,2000,4000,8000),
+                      colors = hcl.colors(4, "Heat")) +
+  labs(title = "RF Confusion Matrix") +
+  theme_bw() + theme(legend.position = "none") 
+
+cmxB <- ConfMatrix(predAll, 
+                   thresh = as.numeric(testOut[3,9]), 
+                   column = 3)
+
+ggplot(data=as.data.frame(cmxB),
+       aes(x=observed, y=predicted)) +
+  geom_tile(aes(fill=Freq), color="white") +
+  geom_text(aes(label=Freq), vjust=1) +
+  scale_fill_gradientn(breaks=c(400,2000,4000,8000),
+                      colors = hcl.colors(4, "Heat")) +
+  labs(title = "BRT Confusion Matrix") +
+  theme_bw() + theme(legend.position = "none")
+
+cmxE <- ConfMatrix(predAll,
+                   thresh = as.numeric(testOut[4,9]),
+                   column = 4)
+
+ggplot(data=as.data.frame(cmxE),
+       aes(x=observed, y=predicted)) +
+  geom_tile(aes(fill=Freq), color="white") +
+  geom_text(aes(label=Freq), vjust=1) +
+  scale_fill_gradientn(breaks=c(400,2000,4000,8000),
+                      colors = hcl.colors(4, "Heat")) +
+  labs(title = "Ensemble Confusion Matrix") +
+  theme_bw() + theme(legend.position = "none")
+```
+
+
+## Variable Importance
+```{r vimp}
+RF_mod <- readRDS(paste0(pth,"RF_4200trees_Jan12_2021.rds"))
+GLM_mod <- readRDS(paste0(pth,"GLMER_Jan07_2021.rds"))
+BRT_mod <- readRDS(paste0(pth,"BRT_gbmholdout_50ktJan11_2021.rds"))
+```
+
+```{r stdvimp}
+RF_imp <- as.data.table(RF_mod[["importance"]], 
+                        keep.rownames = TRUE)
+ginisum <- sum(RF_imp$MeanDecreaseGini)
+RF_imp[, standGini := (MeanDecreaseGini / ginisum)]
+RF_imp <- setorder(RF_imp, -MeanDecreaseAccuracy)
+
+BRT_imp <- as.data.table(summary(BRT_mod, plotit = FALSE),
+                         keekeep.rownames = FALSE)
+relsum <- sum(BRT_imp$rel.inf)
+BRT_imp[, standInfl := (rel.inf / relsum)]
+
+GLM_imp <- data.table(var=fixef(GLM_mod),
+                      inputs=names(fixef(GLM_mod)))
+GLM_imp[, absval := abs(var)]
+varsum <- sum(GLM_imp$absval)
+GLM_imp[, standvar := (absval / varsum)]
+GLM_imp <- setorder(GLM_imp, -standvar)
+
+```
+
+The values have all been normalized so that the sum of all variable importance measures for a model = 1. These are from the *Training* data.  
+
+```{r plotvimp, cache=FALSE, fig.show="hold"}
+ggplot(GLM_imp, aes(x=reorder(inputs, standvar, sum),
+                    y=standvar)) +
+  geom_col(fill=hcl.colors(nrow(GLM_imp), "Purple-Blue"),
+           color="black") +
+  coord_flip() + ylim(c(0,0.33)) +
+  labs(x="", y="Relative Importance",
+       title="Generalized Linear Mixed Model")
+
+ggplot(RF_imp, aes(x=reorder(rn, MeanDecreaseAccuracy, sum),
+                   y=MeanDecreaseAccuracy)) +
+  geom_col(fill=hcl.colors(nrow(RF_imp), "purples"),
+           color="black") +
+  coord_flip() + ylim(c(0,0.33)) +
+  labs(x="", y="Relative Importance",
+       title="Random Forest")
+
+ggplot(BRT_imp, aes(x=reorder(var, standInfl, sum),
+                   y=standInfl)) +
+  geom_col(fill=hcl.colors(nrow(BRT_imp), "purples"),
+           color="black") +
+  coord_flip() + ylim(c(0,0.33)) +
+  labs(x="", y="Relative Importance",
+       title="Boosted Regression Tree")
+```
+
+### RF response
+Meh... I cannot figure out any way to get meaningful plots out of a randomForest::randomForest object.
+
+
+### BRT top interactions:  
+```{r BRTint, message=FALSE, fig.show="hold"}
+#only works if BRT_mod winds up being a dismo object
+BRTinter <- gbm.interactions(BRT_mod, mask.object = BRT_mod)
+
+kable(BRTinter$rank.list, format = "html", row.names = FALSE, digits = 0) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(c(2,4), bold=TRUE)
+
+gbm.perspec(BRT_mod, x=10, y=9, phi=20, col="lightblue", shade=0.8)
+gbm.perspec(BRT_mod, x=4, y=1, phi=20, col="lightblue", shade=0.8)
+```
+
+### GLMM Residuals:
+```{r GLMdump}
+summary(GLM_mod)
+```
+
+**Grid_ID as random effect**  
+Only a small fraction of the 5,160 Grid_IDs are labeled in the graph below. Also note that the means are jittered but the error bars are not.  
+```{r GLMre, message=FALSE, fig.show="hold", fig.width=9}
+# #below is just the Grid_ID as random effect.
+thing <- ranef(GLM_mod)
+dfthing <- as.data.frame(thing)
+dfthing$state <- stringr::str_sub(dfthing$grp, start = 1, end = 2)
+
+ggplot(dfthing, aes(y=grp,x=condval)) +
+  facet_wrap(~term,scales="free_x") +
+  geom_errorbarh(aes(xmin=condval -2*condsd,
+                     xmax=condval +2*condsd), height=0, color="gray") +
+  geom_jitter(aes(color=state), pch=20, width=0.5) +
+  labs(x="Residual",y="Grid_ID",
+       title="Mean and standard deviation of residuals for Grid_ID as random effect") +
+  guides(y=guide_axis(check.overlap=TRUE),
+         color=guide_legend(override.aes = list(pch=19)))
+
+#dotplot.ranef.mer(thing, data=GLM_mod)
+lattice::qqmath(~ condval | state, data=dfthing,
+                main="Distribution of Mean Residuals of Random Effect by State")
+```
+  
+I'm not sure what to make of this graph, except that the data isn't normally distributed. However, based on Arizona, I will hazard a guess that the low-slope begining of each graph represents grid cells without prairie dogs and the steeper slope represents grid cells with prairie dogs.  
