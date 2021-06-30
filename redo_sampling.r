@@ -4,7 +4,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 11/19/2020
+# Code Last Modified 01/05/2021
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -73,17 +73,14 @@ myextract <- function(inpts, inrow){
 ### I) Re-do generation of sample points with the new polygon data ###
 
 # shapefile of presence polygons. Already clipped to be within backpolys
-pres_shp <- "pdog_polys_11172020.shp"
+pres_shp <- "pdog_polys_01052021.shp"
 # shapefile of blocks where all points will be generated
-back_shp <- "SamplingGrid2020_Nov16.shp"
+back_shp <- "SamplingGrid2021_Jan05.shp"
 # fieldname in backpolys that identifies each block
 block_id <- "Grid_ID"
 
 prespolys <- st_read(pres_shp, quiet = T)
 backpolys <- st_read(back_shp, quiet = T)
-# Only want to generate absence points in the censused blocks, not the
-# grid cells containing ad hoc digitized colonies.
-abspolys <- filter(backpolys, abs==1)
 
 # Want every prespoly to get at least 1 point, polys >= 2 ha get 1 pt/ha
 prespolys$Sampnum <- floor(prespolys$Shape_Area / 10000)
@@ -96,8 +93,8 @@ tot_pres <- sum(prespolys$Sampnum)
 tot_abs <- floor(tot_pres * 1.5)
 
 # Do not want absence pts generated inside presence polys
-abpoly_clip <- st_erase(abspolys, prespolys) #FIXME failed, used ArcGIS clip
-# abpoly_clip <- st_read("abspoly_clip.shp", quiet = T)
+# NOTE: st_erase(abspolys, prespolys) fails, do the clipping in ArcGIS
+abpoly_clip <- st_read("abspoly_clip01062021.shp", quiet = T)
 abpoly_clip$Shape_Area <- st_area(abpoly_clip)
 tot_area <- (sum(abpoly_clip$Shape_Area))
 # Now that I've introduced units in the erase function,
@@ -105,6 +102,8 @@ tot_area <- (sum(abpoly_clip$Shape_Area))
 abpoly_clip$Sampnum <- as.numeric(ceiling((abpoly_clip$Shape_Area / tot_area) * tot_abs))
 abpoly_clip <- mutate(abpoly_clip,
                       Sampnum = if_else(Sampnum == 0, 1, Sampnum))
+# Only want to generate absence points in the censused blocks
+abspolys <- filter(abpoly_clip, New==0)
 
 # *** Generate Presence Points ***
 cl <- snow::makeCluster(16, type = "SOCK")
@@ -119,16 +118,15 @@ snow::stopCluster(cl)
 
 prespts_out <- st_join(st_as_sf(prespts, crs = st_crs(backpolys)), st_as_sf(backpolys)) %>%
   dplyr::select(all_of(block_id))
-st_write(prespts_out, "BTPD_prespts_Nov2020.shp")
+st_write(prespts_out, "BTPD_prespts_Jan2021.shp")
 
 # *** Generate Absence Points ***
 cl <- snow::makeCluster(16, type = "SOCK")
 registerDoSNOW(cl)
-
-abspts <- foreach(p=1:nrow(abpoly_clip),
+abspts <- foreach(p=1:nrow(abspolys),
                   .combine=bind_rows,
                   .packages=c("sf", "spatstat", "maptools", "dplyr")) %dopar%
-  mysample(abpoly_clip$geometry[[p]], abpoly_clip$Sampnum[[p]])
+  mysample(abspolys$geometry[[p]], abspolys$Sampnum[[p]])
 
 snow::stopCluster(cl)
 
@@ -136,15 +134,11 @@ abspts <- st_join(st_as_sf(abspts, crs = st_crs(backpolys)), st_as_sf(backpolys)
   dplyr::select(all_of(block_id))
 
 # Remove any absence point that is within *500m* of a presence point.
-##NOTE runs out of memory with raster::pointDistance
-# thing <- pointDistance(abspts, prespts_out, lonlat = F)
-# idx <- which(thing <= 500)
-# ptsmod_idx <- unique(arrayInd(idx, dim(thing))[, 1])
-# abspts_out <- abspts[-ptsmod_idx, ]
+# NOTE: runs out of memory with raster::pointDistance
 too_close <- st_is_within_distance(abspts, prespts_out, 500)
 ptsmod_idx <- which(lengths(too_close) == 0)
 abspts_out <- abspts[ptsmod_idx, ]
-st_write(abspts_out, "BTPD_abspts_Nov2020.shp", driver = "ESRI Shapefile")
+st_write(abspts_out, "BTPD_abspts_Jan2021.shp", driver = "ESRI Shapefile")
 
 ### II) Generate full response table ###
 prespts_out$response <- rep(1, times = nrow(prespts_out))
@@ -161,7 +155,8 @@ registerDoSNOW(cl)
 outvals <- foreach(r=1:nrow(inputs),
                    .packages = c("raster", "sp", "sf"),
                    .combine = "cbind") %dopar%
-  myextract(as_Spatial(allpts), inputs[r, 1:2])
+  #myextract(as_Spatial(allpts), inputs[r, 1:2])
+  myextract(allpts, inputs[r, 1:2])
 
 outdt <- data.table(outvals)
 
@@ -184,8 +179,8 @@ outdt <- tibble::rownames_to_column(outdt, var = "ID")
 full_data <- sp::merge(allpts, outdt, by = "ID")
 
 # Save response table
-fwrite(as.data.frame(full_data), file = "response_Nov2020.csv")
-full_data <- tidyr::drop_na(full_data)
+full_data <- tidyr::drop_na(as.data.frame(full_data))
+fwrite(as.data.frame(full_data), file = "response_Jan2021.csv")
 
 ### III) Split out into Training-Tweaking-Testing (70-15-15) datasets ###
 test_pct <- 0.30 # proportion of response data to withhold from Training
@@ -195,7 +190,7 @@ test_pct <- 0.30 # proportion of response data to withhold from Training
 pos_IDs <- as.character(unique(prespts_out$Grid_ID))
 
 # 2) Remaining Grid_IDs are 'negative' cells
-all_IDs <- (unique(full_data$Grid_ID))
+all_IDs <- as.character((unique(full_data$Grid_ID)))
 posidx <- which(pos_IDs %in% all_IDs)
 neg_IDs <- all_IDs[-posidx]
 
@@ -231,8 +226,8 @@ train_negpts <- dplyr::filter(full_data,
                               (Grid_ID %in% train_neg) &
                                 (response==0))
 
-training_pts <- rbind(train_pospts, train_negpts)
-fwrite(training_pts, file = "training_data11192020.csv")
+training_pts <- as.data.table(rbind(train_pospts, train_negpts))
+fwrite(training_pts, file = "training_data01072021.csv")
 
 # 6) Assign the 10-fold numbers and save as the Training data
 folds <- 10
@@ -243,7 +238,7 @@ kfdt <- data.table(Grid_ID=names(kf), KFsplit=kf, stringsAsFactors = TRUE)
 
 # Add the Split column to the dataset
 indata <- indata[kfdt, on=.(Grid_ID=Grid_ID)]
-fwrite(indata, file = "training_kfold11192020.csv")
+fwrite(indata, file = "training_kfold01072021.csv")
 
 # Let's run some summary stats on the folds to check for weirdness.
 library(ggplot2)
@@ -251,7 +246,7 @@ inroll <- rollup(indata, j = c(list(cnt=.N), lapply(.SD, mean)),
                  by = c("KFsplit", "response"), .SDcols = c(4:25))
 subresp <- inroll[!is.na(response)]
 setorder(subresp, KFsplit, response)
-fwrite(subresp, file = "KFSplit_byResponse_Nov19.csv")
+fwrite(subresp, file = "KFSplit_byResponse_01072021.csv")
 
 qplot(x=factor(KFsplit), data=indata, geom="bar", fill=factor(response),
       xlab="K-fold Split", ylab="Count",
@@ -266,6 +261,7 @@ qplot(factor(response), value, data=tograph,
 
 # 7) Of the remaining 30% positive cells from 3), select half
 #    and repeat steps 4 & 5.
+# TODO: Turn the routine into a function instead of repetitive code
 remaining_pos <- pos_IDs[-which(train_pos %in% pos_IDs)]
 remaining_neg <- neg_IDs[-which(train_neg %in% neg_IDs)]
 
@@ -298,7 +294,7 @@ twk_negpts <- dplyr::filter(full_data,
 
 # 8) Save this dataset as the Tweaking data
 tweak_pts <- rbind(twk_pospts, twk_negpts)
-fwrite(tweak_pts, file = "tweaking_data11192020.csv")
+fwrite(tweak_pts, file = "tweaking_data01072021.csv")
 
 # 9) Repeat with the remaining 15% positive cells
 test_pos <- remaining_pos[-which(twk_pos %in% remaining_pos)]
@@ -333,4 +329,4 @@ test_negpts <- dplyr::filter(full_data,
 
 # 10) Save this dataset as the Testing data
 test_pts <- rbind(test_pospts, test_negpts)
-fwrite(test_pts, file = "testing_data11192020.csv")
+fwrite(test_pts, file = "testing_data01072021.csv")

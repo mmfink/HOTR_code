@@ -4,7 +4,7 @@
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 06/22/2020
+# Code Last Modified 01/26/2021
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -31,6 +31,7 @@ opt.cut <- function(perf, pred, type="sens95"){
   #https://www.r-bloggers.com/a-small-introduction-to-the-rocr-package/
   #type="senspec" calculates sensitivity = specificity threshold
   #type="sens95" caclulates sensitivity = 0.95 threshold
+  #type="spec95" calculates specificty = 0.95 threshold
 
   mapply(FUN=function(x, y, p){
     if(type == "senspec"){
@@ -41,6 +42,16 @@ opt.cut <- function(perf, pred, type="sens95"){
     } else if(type == "sens95"){
       d = which(y >= 0.95)
       ind = which(y == min(y[d]))
+      if(length(ind > 1)){ # if ties, take first
+        idx <- ind[1]
+      } else {
+        idx <- ind
+      }
+      c(sensitivity = y[[idx]], specificity = 1-x[[idx]],
+        cutoff = p[[idx]])
+    } else if(type == "spec95"){
+      d = which(x <= 0.05)
+      ind = which(x == max(x[d]))
       if(length(ind > 1)){ # if ties, take first
         idx <- ind[1]
       } else {

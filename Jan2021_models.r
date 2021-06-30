@@ -1,11 +1,9 @@
 #############################################################################
-# Run models with new (Nov 2020) data sampling scheme.
-# See redo_sampling.r and kfold.r for what came before.
-# Requires functions in 'Performance_functions.r'
+# Run models with new (Jan 2021) data sampling scheme. See redo_sampling.r
 #
 # Michelle M. Fink, michelle.fink@colostate.edu
 # Colorado Natural Heritage Program, Colorado State University
-# Code Last Modified 11/24/2020
+# Code Last Modified 01/12/2021
 #
 # Code licensed under the GNU General Public License version 3.
 # This script is free software: you can redistribute it and/or modify
@@ -21,7 +19,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see https://www.gnu.org/licenses/
 #############################################################################
-
+.libPaths("E:/MMF/R/win-library/3.6")
+Sys.setenv(R_USER = "E:/MMF")
 library(stringr)
 library(data.table)
 library(dplyr)
@@ -33,15 +32,14 @@ library(dismo)
 library(ROCR)
 library(ggplot2)
 
-source("Performance_functions.r")
-
 pth <- "H:/HOTR_models"
 setwd(pth)
-set.seed(5498)
+source("Performance_functions.r")
+set.seed(7981)
 
-train_data <- fread("training_kfold11192020.csv", header=TRUE, sep=",")
+train_data <- fread("training_kfold01072021.csv", header=TRUE, sep=",")
 indata <- train_data[, Grid_ID := as.factor(Grid_ID)]
-rnam <- "Nov24_2020"
+rnam <- "Jan11_2021"
 
 ## **GLM** ##
 outnam <- paste0("GLMER_", rnam)
@@ -59,7 +57,7 @@ f_glm <- as.formula(paste("response ~", q, sep = " "))
 allcols <- c("response", "Grid_ID", varG)
 dat <- indata[, ..allcols]
 
-glmm.fit <- glmer(f_glm, data = indata,
+glmm.fit <- glmer(f_glm, data = dat,
                   family = "binomial",
                   control = glmerControl(optimizer = "bobyqa"),
                   nAGQ = 0,
@@ -73,18 +71,18 @@ glmm.fit <- glmer(f_glm, data = indata,
 saveRDS(glmm.fit, paste0(outnam, ".rds"))
 summary(glmm.fit)
 
-# Evaluate with Tweak data #
-tweak_data <- fread("tweaking_data11192020.csv", header=TRUE, sep=",")
+### Evaluate with Tweak data ###
+tweak_data <- fread("tweaking_data01072021.csv", header=TRUE, sep=",")
 twkdat <- tweak_data[, ..allcols][, Grid_ID := as.factor(Grid_ID)]
 twkGLM <- predict(glmm.fit, newdata=twkdat, type="response", allow.new.levels=TRUE)
 evGLM <- data.table(prob=twkGLM, resp=twkdat[, response])
 outGLM <- testEval(evGLM, outnam)
 
-## **RF** ##
-ncores <- 16
+## RF ##
+ncores <- 14
 outnam <- paste0("RF_4800trees_", rnam)
 ntrees <- 4800
-mt <- 9
+mt <- 6  # see tuning results in kfold_01072021.r
 treeSubs <- ntrees/ncores
 bestvars_T <- fread("vars_to_keep_Mar02.csv", header=TRUE, sep=",")
 varT <- bestvars_T$invar[bestvars_T$keep==1]
@@ -113,13 +111,13 @@ varImpPlot(rf.fit1)
 
 snow::stopCluster(cl)
 
-# Evaluate with Tweak data #
+### Evaluate with Tweak data ###
 twkdat <- tweak_data[, ..allcols][, response := as.factor(response)][, nlcd := as.factor(nlcd)]
 twkRF <- predict(rf.fit1, newdata=twkdat, type="prob", norm.votes=TRUE)
 evRF <- data.table(prob=twkRF[,2], resp=twkdat[, response])
-outRF <- testEval(evRF, "RF_4800t_mtry9")
+outRF <- testEval(evRF, "RF_4200t_mtry6")
 
-## **BRT** ##
+## BRT ##
 outnam <- paste0("BRT_gbmholdout_50kt", rnam)
 indata <- train_data[, ..allcols][, nlcd := as.factor(nlcd)]
 
@@ -132,24 +130,22 @@ brt.fit <- gbm.holdout(indata, gbm.x = c(2:14), gbm.y = 1,
 saveRDS(brt.fit, paste0(outnam, ".rds"))
 summary(brt.fit)
 gbm.interactions(brt.fit, mask.object = brt.fit)
-# stopped at 25083 trees, ~5k more than last run.
+# stopped at 26,270 trees, ~1.5k more than previous run.
 
-# Evaluate with Tweak data #
+### Evaluate with Tweak data ###
 twkdat <- tweak_data[, ..allcols][, nlcd := as.factor(nlcd)]
-twkBRT <- predict(brt.fit, newdata=twkdat, n.trees=25083, type="response")
+twkBRT <- predict(brt.fit, newdata=twkdat, n.trees=26270, type="response")
 evBRT <- data.table(prob=twkBRT, resp=twkdat[, response])
-outBRT <- testEval(evBRT, "BRT_25083trees")
+outBRT <- testEval(evBRT, "BRT_26270trees")
 
-# Combine and save evaluation metrics
+# Combine and save
 twkOut <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitivity, ~Specificity, ~Threshold,
                            outGLM[[1]],outGLM[[2]],outGLM[[3]],outGLM[[4]],outGLM[[5]],outGLM[[6]],outGLM[[7]],outGLM[[8]],outGLM[[9]],
                            outRF[[1]],outRF[[2]],outRF[[3]],outRF[[4]],outRF[[5]],outRF[[6]],outRF[[7]],outRF[[8]],outRF[[9]],
                            outBRT[[1]],outBRT[[2]],outBRT[[3]],outBRT[[4]],outBRT[[5]],outBRT[[6]],outBRT[[7]],outBRT[[8]],outBRT[[9]])
 
-fwrite(twkOut, file = "Tweak15pct_Nov242020.csv")
-
-# Graph a comparison of Tweak vs. Cross-Validation metrics
-fullcv <- fread("CrossValidation_metricsNov23.csv", header=TRUE, sep=",")
+fwrite(twkOut, file = "Tweak15pct_01122021.csv")
+fullcv <- fread("CrossValidation_metrics01072021.csv", header=TRUE, sep=",")
 tograph <- melt(fullcv, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
 toadd <- melt(twkOut, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
 
@@ -164,7 +160,7 @@ ggplot(data=tograph, aes(x=factor(metric), y=value)) +
   guides(fill=guide_legend(title = "10fold Training"),
          color=guide_legend(title = "Tweaking data"))
 
-# Re-do with Sensitivity=Specificty metrics, just to see
+# Re-do with Sensitivity=Specificty metrics
 outGLM <- testEval(evGLM, "GLMER_Nov24_2020", cutype = "senspec")
 outRF <- testEval(evRF, "RF_4800t_mtry9", cutype = "senspec")
 outBRT <- testEval(evBRT, "BRT_25083trees", cutype = "senspec")
@@ -174,8 +170,8 @@ twkOut <- tibble::tribble(~Name, ~AUC, ~TSS, ~err_rate, ~kappa, ~PCC, ~Sensitivi
                            outRF[[1]],outRF[[2]],outRF[[3]],outRF[[4]],outRF[[5]],outRF[[6]],outRF[[7]],outRF[[8]],outRF[[9]],
                            outBRT[[1]],outBRT[[2]],outBRT[[3]],outBRT[[4]],outBRT[[5]],outBRT[[6]],outBRT[[7]],outBRT[[8]],outBRT[[9]])
 
-fwrite(twkOut, file = "Tweak15pct_Nov242020_senspec.csv")
-fullcv <- fread("CrossValidation_metrics_SenSpec_Nov23.csv", header=TRUE, sep=",")
+fwrite(twkOut, file = "Tweak15pct_01072021_senspec.csv")
+fullcv <- fread("CrossValidation_metrics_SenSpec_01072021.csv", header=TRUE, sep=",")
 tograph <- melt(fullcv, id.vars = c("cv", "model"), measure.vars = c(2:9), variable.name = "metric")
 toadd <- melt(twkOut, id.vars = "Name", measure.vars = c(2:9), variable.name = "metric")
 
